@@ -2,8 +2,8 @@ import chalk from "chalk";
 import boxen from "boxen";
 import { text, isCancel, cancel, intro, outro, multiselect } from "@clack/prompts";
 import yoctoSpinner from "yocto-spinner";
-import { marked } from "marked";
-import { markedTerminal } from "marked-terminal";
+import { slashCommandManager } from "../lib/slash-command-manager.js";
+import { undoManager } from "../lib/undo-manager.js";
 import {
     availableTools,
     getEnabledTools,
@@ -11,58 +11,38 @@ import {
     getEnabledToolNames,
     resetTools
 } from "../../config/tool.config.js";
-import { AIService } from "../ai/google-services.js";
-import { ChatService } from "../../services/chat.service.js";
-import { getStoredToken } from "../commands/auth/login.js";
-import prisma from "../../lib/db.js";
+import { configManager } from "../config/config-manager.js";
+import {
+    marked,
+    chatService,
+    getUserFromToken,
+    displayMessages,
+    saveMessage,
+    updateConversationTitle,
+    SYSTEM_PROMPT,
+    logUpdate,
+} from "./chat-base.js";
 
-// Configure marked for terminal
-marked.use(
-    markedTerminal({
-        code: chalk.cyan,
-        blockquote: chalk.gray.italic,
-        heading: chalk.green.bold,
-        firstHeading: chalk.magenta.underline.bold,
-        hr: chalk.reset,
-        listitem: chalk.reset,
-        list: chalk.reset,
-        paragraph: chalk.reset,
-        strong: chalk.bold,
-        em: chalk.italic,
-        codespan: chalk.yellow.bgBlack,
-        del: chalk.dim.gray.strikethrough,
-        link: chalk.blue.underline,
-        href: chalk.blue.underline,
-    })
-);
+let aiService = null;
 
-const aiService = new AIService();
-const chatService = new ChatService();
-
-async function getUserFromToken() {
-    const token = await getStoredToken();
-
-    if (!token?.access_token) {
-        throw new Error("Not authenticated. Please run 'orbit login' first.");
+async function initAIService() {
+    try {
+        const config = configManager.getConfig();
+        const provider = config?.provider || "gemini";
+        
+        if (provider === 'openrouter') {
+            const { OpenRouterProvider } = await import("../providers/openrouter-provider.js");
+            aiService = new OpenRouterProvider();
+        } else {
+            const { GeminiProvider } = await import("../providers/gemini-provider.js");
+            aiService = new GeminiProvider();
+        }
+    } catch (error) {
+        console.error(chalk.red(`\nFailed to initialize AI Service: ${error.message}`));
+        console.log(chalk.yellow("Falling back to Gemini..."));
+        const { GeminiProvider } = await import("../providers/gemini-provider.js");
+        aiService = new GeminiProvider();
     }
-
-    const spinner = yoctoSpinner({ text: "Authenticating..." }).start();
-
-    const user = await prisma.user.findFirst({
-        where: {
-            sessions: {
-                some: { token: token.access_token },
-            },
-        },
-    });
-
-    if (!user) {
-        spinner.error("User not found");
-        throw new Error("User not found. Please login again.");
-    }
-
-    spinner.success(`Welcome back, ${user.name}!`);
-    return user;
 }
 
 async function selectTools() {
@@ -150,36 +130,7 @@ async function initConversation(userId, conversationId = null, mode = "tool") {
     return conversation;
 }
 
-function displayMessages(messages) {
-    messages.forEach((msg) => {
-        if (msg.role === "user") {
-            const userBox = boxen(chalk.white(msg.content), {
-                padding: 1,
-                margin: { left: 2, bottom: 1 },
-                borderStyle: "round",
-                borderColor: "blue",
-                title: "👤 You",
-                titleAlignment: "left",
-            });
-            console.log(userBox);
-        } else if (msg.role === "assistant") {
-            const renderedContent = marked.parse(msg.content);
-            const assistantBox = boxen(renderedContent.trim(), {
-                padding: 1,
-                margin: { left: 2, bottom: 1 },
-                borderStyle: "round",
-                borderColor: "green",
-                title: "🤖 Assistant (with tools)",
-                titleAlignment: "left",
-            });
-            console.log(assistantBox);
-        }
-    });
-}
-
-async function saveMessage(conversationId, role, content) {
-    return await chatService.addMessage(conversationId, role, content);
-}
+const MAX_HISTORY = 50;
 
 async function getAIResponse(conversationId) {
     const spinner = yoctoSpinner({
@@ -187,8 +138,13 @@ async function getAIResponse(conversationId) {
         color: "cyan"
     }).start();
 
-    const dbMessages = await chatService.getMessages(conversationId);
-    const aiMessages = chatService.formatMessagesForAI(dbMessages);
+    const allDbMessages = await chatService.getMessages(conversationId);
+    // Truncate to avoid silently hitting the model's token limit on long sessions
+    const dbMessages = allDbMessages.slice(-MAX_HISTORY);
+    const aiMessages = [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...chatService.formatMessagesForAI(dbMessages),
+    ];
 
     const tools = getEnabledTools();
 
@@ -210,6 +166,8 @@ async function getAIResponse(conversationId) {
                     isFirstChunk = false;
                 }
                 fullResponse += chunk;
+                // Render markdown progressively
+                logUpdate(marked.parse(fullResponse));
             },
             tools,
             (toolCall) => {
@@ -252,10 +210,9 @@ async function getAIResponse(conversationId) {
             console.log(toolResultBox);
         }
 
-        // Render markdown response
-        console.log("\n");
-        const renderedMarkdown = marked.parse(fullResponse);
-        console.log(renderedMarkdown);
+        // Clear log-update and finalize
+        logUpdate.clear();
+        console.log(marked.parse(fullResponse));
         console.log(chalk.gray("─".repeat(60)));
         console.log("\n");
 
@@ -263,14 +220,6 @@ async function getAIResponse(conversationId) {
     } catch (error) {
         spinner.error("Failed to get AI response");
         throw error;
-    }
-}
-
-
-async function updateConversationTitle(conversationId, userInput, messageCount) {
-    if (messageCount === 1) {
-        const title = userInput.slice(0, 50) + (userInput.length > 50 ? "..." : "");
-        await chatService.updateTitle(conversationId, title);
     }
 }
 
@@ -311,14 +260,15 @@ async function chatLoop(conversation) {
             process.exit(0);
         }
 
+        // Handle slash commands (includes /exit)
+        if (userInput.startsWith('/')) {
+            const handled = await slashCommandManager.handleSlashCommand(userInput, { undoStack: undoManager });
+            if (handled) continue;
+        }
+
+        // Keep standard exit for pure text match as fallback
         if (userInput.toLowerCase() === "exit") {
-            const exitBox = boxen(chalk.yellow("Chat session ended. Goodbye! 👋"), {
-                padding: 1,
-                margin: 1,
-                borderStyle: "round",
-                borderColor: "yellow",
-            });
-            console.log(exitBox);
+            await slashCommandManager.handleSlashCommand("/exit");
             break;
         }
 
@@ -343,7 +293,7 @@ async function chatLoop(conversation) {
 export async function startToolChat(conversationId = null) {
     try {
         intro(
-            boxen(chalk.bold.cyan("🛠️  Orbit AI - Tool Calling Mode"), {
+            boxen(chalk.bold.cyan("🛠️  Wemiys AI - Tool Calling Mode"), {
                 padding: 1,
                 borderStyle: "double",
                 borderColor: "cyan",
@@ -351,6 +301,7 @@ export async function startToolChat(conversationId = null) {
         );
 
         const user = await getUserFromToken();
+        await initAIService();
 
         // Select tools
         await selectTools();

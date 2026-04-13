@@ -88,7 +88,7 @@ export async function requireAuth() {
 
     if (!token) {
         console.log(
-            chalk.red("❌ Not authenticated. Please run 'your-cli login' first.")
+            chalk.red("❌ Not authenticated. Please run 'wemiy login' first.")
         );
         process.exit(1);
     }
@@ -97,7 +97,7 @@ export async function requireAuth() {
         console.log(
             chalk.yellow("⚠️  Your session has expired. Please login again.")
         );
-        console.log(chalk.gray("   Run: your-cli login\n"));
+        console.log(chalk.gray("   Run: wemiy login\n"));
         process.exit(1);
     }
 

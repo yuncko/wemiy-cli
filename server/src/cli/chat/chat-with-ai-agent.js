@@ -1,36 +1,32 @@
 import chalk from "chalk";
 import boxen from "boxen";
 import { text, isCancel, cancel, intro, outro, confirm } from "@clack/prompts";
-import { getStoredToken } from "../commands/auth/login.js";
 import { generateApplication } from "../../config/agent.config.js";
-import prisma from "../../lib/db.js";
-import { AIService } from "../ai/google-services.js";
-import { ChatService } from "../../services/chat.service.js";
+import { configManager } from "../config/config-manager.js";
+import { slashCommandManager } from "../lib/slash-command-manager.js";
+import { undoManager } from "../lib/undo-manager.js";
+import { chatService, getUserFromToken, logUpdate, marked } from "./chat-base.js";
 
-const aiService = new AIService();
-const chatService = new ChatService();
+let aiService = null;
 
-async function getUserFromToken() {
-    const token = await getStoredToken();
-
-    if (!token?.access_token) {
-        throw new Error("Not authenticated. Please run 'orbit login' first.");
+async function initAIService() {
+    try {
+        const config = configManager.getConfig();
+        const provider = config?.provider || "gemini";
+        
+        if (provider === 'openrouter') {
+            const { OpenRouterProvider } = await import("../providers/openrouter-provider.js");
+            aiService = new OpenRouterProvider();
+        } else {
+            const { GeminiProvider } = await import("../providers/gemini-provider.js");
+            aiService = new GeminiProvider();
+        }
+    } catch (error) {
+        console.error(chalk.red(`\nFailed to initialize AI Service: ${error.message}`));
+        console.log(chalk.yellow("Falling back to Gemini..."));
+        const { GeminiProvider } = await import("../providers/gemini-provider.js");
+        aiService = new GeminiProvider();
     }
-
-    const user = await prisma.user.findFirst({
-        where: {
-            sessions: {
-                some: { token: token.access_token },
-            },
-        },
-    });
-
-    if (!user) {
-        throw new Error("User not found. Please login again.");
-    }
-
-    console.log(chalk.green(`\n✓ Welcome back, ${user.name}!\n`));
-    return user;
 }
 
 async function initConversation(userId, conversationId = null) {
@@ -106,8 +102,14 @@ async function agentLoop(conversation) {
             process.exit(0);
         }
 
+        // Handle slash commands (includes /exit)
+        if (userInput.startsWith('/')) {
+            const handled = await slashCommandManager.handleSlashCommand(userInput, { undoStack: undoManager });
+            if (handled) continue;
+        }
+
         if (userInput.toLowerCase() === "exit") {
-            console.log(chalk.yellow("\n👋 Agent session ended\n"));
+            await slashCommandManager.handleSlashCommand("/exit");
             break;
         }
 
@@ -188,6 +190,7 @@ export async function startAgentChat(conversationId = null) {
         );
 
         const user = await getUserFromToken();
+        await initAIService();
 
         // Warning about file system access
         const shouldContinue = await confirm({

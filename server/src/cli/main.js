@@ -1,48 +1,59 @@
 #!/usr/bin/env node
 
 import dotenv from "dotenv";
+import { fileURLToPath } from "url";
+import path from "path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load .env from the server root (two levels up from src/cli/)
+dotenv.config({ path: path.join(__dirname, "../../.env") });
+
 import { Command } from "commander";
 import chalk from "chalk";
 import figlet from "figlet";
-import { login, logout, whoami } from "./commands/auth/login.js";
+import { readFileSync } from "fs";
 import { wakeUp } from "./commands/ai/wakeUp.js";
+import { selectModelCommand } from "./commands/model/selectModel.js";
 
-
-dotenv.config();
+const pkg = JSON.parse(readFileSync(path.join(__dirname, "../../package.json"), "utf-8"));
 
 async function main() {
     // Display banner
     console.log(
         chalk.cyan(
-            figlet.textSync("Orbital CLI", {
+            figlet.textSync("Wemiy CLI", {
                 font: "Standard",
                 horizontalLayout: "default",
             })
         )
     );
-    console.log(chalk.gray("  Authentication CLI for Better Auth\n"));
+    console.log(chalk.gray("  Advanced Agentic AI CLI\n"));
 
-    const program = new Command("orbital");
+    const program = new Command("wemiys");
 
     program
-        .version("0.0.1")
-        .description("Orbital CLI - Device Flow Authentication");
+        .version(pkg.version)
+        .description("Wemiy AI CLI");
 
     // Add commands
-    program.addCommand(login);
-    program.addCommand(logout);
-    program.addCommand(whoami);
+
     program.addCommand(wakeUp);
+
+    program
+        .command("model")
+        .description("Select AI model (OpenRouter)")
+        .action(selectModelCommand);
 
     // Default action shows help
     program.action(() => {
         program.help();
     });
 
-    program.parse();
+    program.parse(process.argv);
 }
 
 main().catch((error) => {
-    console.error(chalk.red("Error running Orbital CLI:"), error);
+    console.error(chalk.red("Error running Wemiy CLI:"), error);
     process.exit(1);
 });

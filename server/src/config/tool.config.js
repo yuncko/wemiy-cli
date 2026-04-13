@@ -1,5 +1,6 @@
 import { google } from '@ai-sdk/google';
-import chalk from 'chalk';
+import { debug } from '../lib/debug.js';
+import { readFileTool, editFileTool } from '../cli/lib/fs-tools.js';
 
 /**
  * Available Google Generative AI tools configuration
@@ -27,6 +28,8 @@ export const availableTools = [
         getTool: () => google.tools.urlContext({}),
         enabled: false,
     },
+    readFileTool,
+    editFileTool
 ];
 
 /**
@@ -45,9 +48,9 @@ export function getEnabledTools() {
 
         // Debug logging
         if (Object.keys(tools).length > 0) {
-            console.log(chalk.gray(`[DEBUG] Enabled tools: ${Object.keys(tools).join(', ')}`));
+            debug(`Enabled tools: ${Object.keys(tools).join(', ')}`);
         } else {
-            console.log(chalk.yellow('[DEBUG] No tools enabled'));
+            debug('No tools enabled');
         }
 
         return Object.keys(tools).length > 0 ? tools : undefined;
@@ -64,10 +67,10 @@ export function toggleTool(toolId) {
     const tool = availableTools.find(t => t.id === toolId);
     if (tool) {
         tool.enabled = !tool.enabled;
-        console.log(chalk.gray(`[DEBUG] Tool ${toolId} toggled to ${tool.enabled}`));
+        debug(`Tool ${toolId} toggled to ${tool.enabled}`);
         return tool.enabled;
     }
-    console.log(chalk.red(`[DEBUG] Tool ${toolId} not found`));
+    debug(`Tool ${toolId} not found`);
     return false;
 }
 
@@ -75,19 +78,19 @@ export function toggleTool(toolId) {
  * Enable specific tools
  */
 export function enableTools(toolIds) {
-    console.log(chalk.gray('[DEBUG] enableTools called with:'), toolIds);
+    debug('enableTools called with:', toolIds);
 
     availableTools.forEach(tool => {
         const wasEnabled = tool.enabled;
         tool.enabled = toolIds.includes(tool.id);
 
         if (tool.enabled !== wasEnabled) {
-            console.log(chalk.gray(`[DEBUG] ${tool.id}: ${wasEnabled} → ${tool.enabled}`));
+            debug(`${tool.id}: ${wasEnabled} → ${tool.enabled}`);
         }
     });
 
     const enabledCount = availableTools.filter(t => t.enabled).length;
-    console.log(chalk.gray(`[DEBUG] Total tools enabled: ${enabledCount}/${availableTools.length}`));
+    debug(`Total tools enabled: ${enabledCount}/${availableTools.length}`);
 }
 
 /**
@@ -95,7 +98,7 @@ export function enableTools(toolIds) {
  */
 export function getEnabledToolNames() {
     const names = availableTools.filter(t => t.enabled).map(t => t.name);
-    console.log(chalk.gray('[DEBUG] getEnabledToolNames returning:'), names);
+    debug('getEnabledToolNames returning:', names);
     return names;
 }
 
@@ -106,5 +109,5 @@ export function resetTools() {
     availableTools.forEach(tool => {
         tool.enabled = false;
     });
-    console.log(chalk.gray('[DEBUG] All tools have been reset (disabled)'));
+    debug('All tools have been reset (disabled)');
 }

@@ -305,7 +305,7 @@ export default function Home() {
               onClick={() => {
                 // Link to documentation or GitHub
                 window.open(
-                  "https://github.com/JaySavani/orbital-cli",
+                  "https://github.com/yuncko/Wemiy-CLI",
                   "_blank",
                 );
               }}
@@ -324,10 +324,10 @@ export default function Home() {
               {/* <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center"> */}
               <LogoSVG height={48} width={48} />
               {/* </div> */}
-              <span className="font-bold">Orbital CLI</span>
+              <span className="font-bold">Wemiy CLI</span>
             </div>
             <p className="text-sm text-muted-foreground text-center md:text-right">
-              © {new Date().getFullYear()} Orbital CLI. All rights reserved.
+              © {new Date().getFullYear()} Wemiy CLI. All rights reserved.
             </p>
           </div>
         </div>
