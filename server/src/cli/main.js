@@ -15,6 +15,7 @@ import figlet from "figlet";
 import { readFileSync } from "fs";
 import { wakeUp } from "./commands/ai/wakeUp.js";
 import { selectModelCommand } from "./commands/model/selectModel.js";
+import { fixCommand } from "./commands/fix/fixFile.js";
 
 const pkg = JSON.parse(readFileSync(path.join(__dirname, "../../package.json"), "utf-8"));
 
@@ -39,6 +40,7 @@ async function main() {
     // Add commands
 
     program.addCommand(wakeUp);
+    program.addCommand(fixCommand);
 
     program
         .command("model")
