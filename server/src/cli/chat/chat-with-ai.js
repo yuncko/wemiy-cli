@@ -17,6 +17,8 @@ import {
     SYSTEM_PROMPT,
     logUpdate,
 } from "./chat-base.js";
+import { readFileTool, editFileTool } from "../lib/fs-tools.js";
+import { scanFiles } from "../utils/file-scanner.js";
 
 let aiService = null;
 
@@ -80,6 +82,24 @@ async function initConversation(userId, conversationId = null, mode = "chat") {
 
 const MAX_HISTORY = 50;
 
+let cachedProjectTree = null;
+
+async function getProjectTreeContext() {
+    if (cachedProjectTree !== null) return cachedProjectTree;
+    try {
+        const files = await scanFiles(process.cwd());
+        const paths = files.map(f => f.relativePath);
+        if (paths.length > 0) {
+            cachedProjectTree = `\n\nCurrent Project Structure:\n\`\`\`\n${paths.slice(0, 1000).join('\n')}\n\`\`\``;
+            return cachedProjectTree;
+        }
+    } catch (e) {
+        // ignore
+    }
+    cachedProjectTree = ""; // save empty to not retry
+    return cachedProjectTree;
+}
+
 async function getAIResponse(conversationId) {
     const spinner = yoctoSpinner({
         text: "AI is thinking...",
@@ -89,13 +109,25 @@ async function getAIResponse(conversationId) {
     const allDbMessages = await chatService.getMessages(conversationId);
     // Truncate to avoid silently hitting the model's token limit on long sessions
     const dbMessages = allDbMessages.slice(-MAX_HISTORY);
+    
+    let dynamicSystemPrompt = SYSTEM_PROMPT;
+    const projectTreeContext = await getProjectTreeContext();
+    if (projectTreeContext) {
+        dynamicSystemPrompt += projectTreeContext;
+    }
+    
     const aiMessages = [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: dynamicSystemPrompt },
         ...chatService.formatMessagesForAI(dbMessages),
     ];
 
     let fullResponse = "";
     let isFirstChunk = true;
+
+    const tools = {
+        read_files: readFileTool.getTool(),
+        edit_file: editFileTool.getTool()
+    };
 
     try {
         const result = await aiService.sendMessage(aiMessages, (chunk) => {
@@ -110,7 +142,7 @@ async function getAIResponse(conversationId) {
             fullResponse += chunk;
             // Render markdown progressively
             logUpdate(marked.parse(fullResponse));
-        });
+        }, tools);
 
         // Clear log-update and print the final solid block
         logUpdate.clear();
