@@ -17,7 +17,7 @@ import {
     SYSTEM_PROMPT,
     logUpdate,
 } from "./chat-base.js";
-import { readFileTool, editFileTool } from "../lib/fs-tools.js";
+import { readFileTool, editFileTool, executeCommandTool } from "../lib/fs-tools.js";
 import { scanFiles } from "../utils/file-scanner.js";
 
 let aiService = null;
@@ -126,7 +126,8 @@ async function getAIResponse(conversationId) {
 
     const tools = {
         read_files: readFileTool.getTool(),
-        edit_file: editFileTool.getTool()
+        edit_file: editFileTool.getTool(),
+        execute_command: executeCommandTool.getTool()
     };
 
     try {

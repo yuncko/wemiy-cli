@@ -17,6 +17,8 @@ import { wakeUp } from "./commands/ai/wakeUp.js";
 import { selectModelCommand } from "./commands/model/selectModel.js";
 import { fixCommand } from "./commands/fix/fixFile.js";
 import { doctorCommand } from "./commands/doctor/doctor.js";
+import { commitCommand } from "./commands/git/commit.js";
+import { reviewCommand } from "./commands/git/review.js";
 
 const pkg = JSON.parse(readFileSync(path.join(__dirname, "../../package.json"), "utf-8"));
 
@@ -43,6 +45,8 @@ async function main() {
     program.addCommand(wakeUp);
     program.addCommand(fixCommand);
     program.addCommand(doctorCommand);
+    program.addCommand(commitCommand);
+    program.addCommand(reviewCommand);
 
     program
         .command("model")

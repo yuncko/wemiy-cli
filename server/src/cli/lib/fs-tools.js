@@ -6,6 +6,10 @@ import { confirm } from '@clack/prompts';
 import { generateDiffPreview } from './diff-preview.js';
 import { undoManager } from './undo-manager.js';
 import chalk from 'chalk';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export const readFileTool = {
     id: 'read_files',
@@ -84,6 +88,63 @@ export const editFileTool = {
             } catch (error) {
                 console.error(chalk.red(`\n❌ Error editing file: ${error.message}\n`));
                 return `Failed to edit file ${filePath}. Error: ${error.message}`;
+            }
+        }
+    })
+};
+
+export const executeCommandTool = {
+    id: 'execute_command',
+    name: 'Execute Command',
+    description: 'Execute a terminal command (like npm test, tsc, or git status). Always asks for user confirmation.',
+    enabled: false,
+    getTool: () => tool({
+        description: 'Run a shell command in the current workspace. Use this to verify code by running tests, linters, or build scripts.',
+        parameters: z.object({
+            command: z.string().describe('The shell command to execute, e.g. "npm test" or "npx tsc"'),
+        }),
+        execute: async ({ command }) => {
+            try {
+                console.log('\n');
+                console.log(chalk.cyan(`🤖 AI wants to run command: ${chalk.bold(command)}`));
+
+                const shouldRun = await confirm({
+                    message: chalk.cyan(`Allow execution of this command?`),
+                    initialValue: true,
+                });
+
+                if (!shouldRun) {
+                    console.log(chalk.yellow(`\n⚠️  Command execution aborted by user.\n`));
+                    return `User rejected the execution of command: ${command}. Suggest an alternative or ask the user what to do.`;
+                }
+
+                console.log(chalk.gray(`\nRunning: ${command}\n`));
+                
+                const { stdout, stderr } = await execAsync(command);
+                
+                let result = '';
+                if (stdout) {
+                    console.log(stdout);
+                    result += `Stdout:\n${stdout}\n`;
+                }
+                if (stderr) {
+                    console.error(chalk.yellow(stderr));
+                    result += `Stderr:\n${stderr}\n`;
+                }
+                
+                if (!result) {
+                    result = 'Command executed successfully with no output.';
+                }
+                
+                console.log(chalk.green(`\n✅ Command completed\n`));
+                return result;
+
+            } catch (error) {
+                console.error(chalk.red(`\n❌ Command failed: ${error.message}\n`));
+                if (error.stdout) console.log(error.stdout);
+                if (error.stderr) console.error(chalk.yellow(error.stderr));
+                
+                return `Command failed with error: ${error.message}\nStdout: ${error.stdout || ''}\nStderr: ${error.stderr || ''}`;
             }
         }
     })
