@@ -19,6 +19,7 @@ import { fixCommand } from "./commands/fix/fixFile.js";
 import { doctorCommand } from "./commands/doctor/doctor.js";
 import { commitCommand } from "./commands/git/commit.js";
 import { reviewCommand } from "./commands/git/review.js";
+import { prReadyCommand } from "./commands/git/pr-ready.js";
 
 const pkg = JSON.parse(readFileSync(path.join(__dirname, "../../package.json"), "utf-8"));
 
@@ -47,6 +48,7 @@ async function main() {
     program.addCommand(doctorCommand);
     program.addCommand(commitCommand);
     program.addCommand(reviewCommand);
+    program.addCommand(prReadyCommand);
 
     program
         .command("model")
