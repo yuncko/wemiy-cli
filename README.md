@@ -1,5 +1,6 @@
 "# Wemiy-CLI""# Wemiy-cli-new" 
-# Wemiy CLI
+# Wemiy CLI <img width="1280" height="761" alt="6015065504818597134_121" src="https://github.com/user-attachments/assets/b90038ef-87e4-414a-b167-a161109dcdfe" />
+
 
 Wemiy CLI is a powerful command-line interface that enhances your development workflow with AI-powered features. From bug fixes to code reviews and commit generation, Wemiy helps you write better code faster.
 
