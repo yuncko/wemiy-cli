@@ -1,10 +1,21 @@
 import { google } from '@ai-sdk/google';
 import { debug } from '../lib/debug.js';
-import { readFileTool, editFileTool } from '../cli/lib/fs-tools.js';
+import {
+    readFileTool,
+    editFileTool,
+    replaceContentTool,
+    executeCommandTool,
+    listDirTool,
+    grepSearchTool,
+} from '../cli/lib/fs-tools.js';
 
 /**
- * Available Google Generative AI tools configuration
- * Tools are instantiated lazily to avoid initialization errors
+ * Available tools configuration.
+ * Each tool is registered with a unique ID, name, description, a lazy getTool()
+ * factory, and an `enabled` flag that is toggled at runtime by the user.
+ *
+ * Tools are instantiated lazily via getTool() to avoid initialization errors
+ * when their provider SDK is not yet configured.
  */
 export const availableTools = [
     {
@@ -28,12 +39,18 @@ export const availableTools = [
         getTool: () => google.tools.urlContext({}),
         enabled: false,
     },
+    // ── File System & Workspace Tools ──────────────────────────────────────
     readFileTool,
-    editFileTool
+    editFileTool,
+    replaceContentTool,
+    executeCommandTool,
+    listDirTool,
+    grepSearchTool,
 ];
 
 /**
- * Get enabled tools as a tools object for AI SDK
+ * Get enabled tools as a tools object for AI SDK.
+ * @returns {Object|undefined} A map of toolId → tool instance, or undefined if none enabled.
  */
 export function getEnabledTools() {
     const tools = {};
@@ -55,13 +72,15 @@ export function getEnabledTools() {
 
         return Object.keys(tools).length > 0 ? tools : undefined;
     } catch (error) {
-        console.error(chalk.red('[ERROR] Failed to initialize tools:'), error.message);
+        debug(`[ERROR] Failed to initialize tools: ${error.message}`);
         return undefined;
     }
 }
 
 /**
- * Toggle a tool's enabled state
+ * Toggle a tool's enabled state by ID.
+ * @param {string} toolId - The tool ID to toggle
+ * @returns {boolean} New enabled state, or false if tool not found
  */
 export function toggleTool(toolId) {
     const tool = availableTools.find(t => t.id === toolId);
@@ -75,7 +94,8 @@ export function toggleTool(toolId) {
 }
 
 /**
- * Enable specific tools
+ * Enable a specific set of tools (by ID) and disable all others.
+ * @param {string[]} toolIds - Array of tool IDs to enable
  */
 export function enableTools(toolIds) {
     debug('enableTools called with:', toolIds);
@@ -94,7 +114,8 @@ export function enableTools(toolIds) {
 }
 
 /**
- * Get all enabled tool names
+ * Get the display names of all currently enabled tools.
+ * @returns {string[]} Array of enabled tool names
  */
 export function getEnabledToolNames() {
     const names = availableTools.filter(t => t.enabled).map(t => t.name);
@@ -103,7 +124,7 @@ export function getEnabledToolNames() {
 }
 
 /**
- * Reset all tools (disable all)
+ * Reset all tools (disable all).
  */
 export function resetTools() {
     availableTools.forEach(tool => {

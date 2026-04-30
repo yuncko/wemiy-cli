@@ -11,6 +11,14 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// READ FILE TOOL
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tool definition for reading one or more files from the workspace.
+ * Returns the contents of the requested files concatenated together.
+ */
 export const readFileTool = {
     id: 'read_files',
     name: 'Read Files',
@@ -37,13 +45,21 @@ export const readFileTool = {
     })
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EDIT FILE TOOL (DEPRECATED for large files — prefer replaceContentTool)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tool definition for full-file replacement edits.
+ * @deprecated For large files, prefer `replaceContentTool` which does targeted block replacement.
+ */
 export const editFileTool = {
     id: 'edit_file',
-    name: 'Edit File',
-    description: 'Modify a file intelligently. Replaces the file with new content. Shows a diff and asks for user confirmation.',
+    name: 'Edit File (Full Rewrite)',
+    description: '[DEPRECATED — prefer "Replace Content" for large files] Replaces the entire file with new content. Shows a diff and asks for user confirmation.',
     enabled: false,
     getTool: () => tool({
-        description: 'Edit a file by completely replacing its content or replacing specific text.',
+        description: 'Edit a file by completely replacing its content. DEPRECATED for large files — use replace_content instead for targeted edits.',
         parameters: z.object({
             filePath: z.string().describe('Path to the file to edit'),
             newContent: z.string().describe('The complete new content of the file. DO NOT output partial snippets, provide the entire updated file content.'),
@@ -93,6 +109,93 @@ export const editFileTool = {
     })
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// REPLACE CONTENT TOOL (Block-Replace — Targeted Editing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tool definition for targeted block-replacement edits.
+ * Finds an exact substring in the file and replaces it, avoiding full-file rewrites.
+ * Shows a diff preview and integrates with the undo system.
+ */
+export const replaceContentTool = {
+    id: 'replace_content',
+    name: 'Replace Content',
+    description: 'Replace a specific block of text in a file with new content. Much more efficient than full-file rewrite for targeted edits.',
+    enabled: false,
+    getTool: () => tool({
+        description: 'Replace a specific block of text inside a file. You must provide the exact text to find and its replacement. This is the preferred way to edit files.',
+        parameters: z.object({
+            filePath: z.string().describe('Path to the file to edit (relative or absolute)'),
+            targetContent: z.string().describe('The exact block of text to find in the file. Must match exactly including whitespace and indentation.'),
+            replacementContent: z.string().describe('The new block of text to replace the target with.'),
+        }),
+        execute: async ({ filePath, targetContent, replacementContent }) => {
+            try {
+                const resolvedPath = path.resolve(process.cwd(), filePath);
+                let fileContent;
+
+                try {
+                    fileContent = await fs.readFile(resolvedPath, 'utf8');
+                } catch (e) {
+                    return `Error: File "${filePath}" not found. Cannot perform replacement on a non-existent file.`;
+                }
+
+                // Locate the target content using exact string match
+                const index = fileContent.indexOf(targetContent);
+                if (index === -1) {
+                    return `Error: Could not find the target content in "${filePath}". Make sure you are providing the EXACT text (including whitespace/indentation) that exists in the file. Read the file first to get the exact content.`;
+                }
+
+                // Check for multiple occurrences
+                const secondIndex = fileContent.indexOf(targetContent, index + 1);
+                if (secondIndex !== -1) {
+                    return `Warning: Found multiple occurrences of the target content in "${filePath}". Please provide a more unique/longer block of text to ensure the correct one is replaced.`;
+                }
+
+                // Build the new file content
+                const newContent = fileContent.substring(0, index) + replacementContent + fileContent.substring(index + targetContent.length);
+
+                // Show diff of only the changed region (with some context)
+                console.log('\n');
+                console.log(generateDiffPreview(fileContent, newContent));
+
+                // Ask for confirmation
+                const shouldApply = await confirm({
+                    message: chalk.cyan(`Apply this replacement to ${filePath}?`),
+                    initialValue: true,
+                });
+
+                if (!shouldApply) {
+                    console.log(chalk.yellow(`\n⚠️  Replacement in ${filePath} aborted by user.\n`));
+                    return `User rejected the replacement in ${filePath}. Ask the user what to do.`;
+                }
+
+                // Record undo state
+                undoManager.push(resolvedPath, fileContent);
+
+                // Write updated content
+                await fs.writeFile(resolvedPath, newContent, 'utf8');
+
+                console.log(chalk.green(`\n✅ Replaced content in ${filePath}\n`));
+                return `Successfully replaced content in ${filePath}.`;
+
+            } catch (error) {
+                console.error(chalk.red(`\n❌ Error replacing content: ${error.message}\n`));
+                return `Failed to replace content in ${filePath}. Error: ${error.message}`;
+            }
+        }
+    })
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXECUTE COMMAND TOOL
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tool definition for executing shell commands in the workspace.
+ * Always prompts the user for confirmation before running.
+ */
 export const executeCommandTool = {
     id: 'execute_command',
     name: 'Execute Command',
@@ -120,7 +223,10 @@ export const executeCommandTool = {
 
                 console.log(chalk.gray(`\nRunning: ${command}\n`));
                 
-                const { stdout, stderr } = await execAsync(command);
+                const { stdout, stderr } = await execAsync(command, {
+                    cwd: process.cwd(),
+                    timeout: 60000, // 60s timeout to prevent hanging
+                });
                 
                 let result = '';
                 if (stdout) {
@@ -145,6 +251,203 @@ export const executeCommandTool = {
                 if (error.stderr) console.error(chalk.yellow(error.stderr));
                 
                 return `Command failed with error: ${error.message}\nStdout: ${error.stdout || ''}\nStderr: ${error.stderr || ''}`;
+            }
+        }
+    })
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIST DIRECTORY TOOL
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Directories and file patterns to ignore when listing the workspace tree.
+ */
+const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', '.next', '.cache', '__pycache__', '.turbo']);
+const IGNORE_FILES = new Set(['.env', '.env.local', '.env.production']);
+const IGNORE_EXTENSIONS = new Set(['.lock']);
+
+/**
+ * Recursively walk a directory and build an ASCII tree string.
+ * @param {string} dir - Absolute directory path
+ * @param {string} prefix - Current indentation prefix for tree rendering
+ * @param {number} depth - Current depth level
+ * @param {number} maxDepth - Maximum recursion depth
+ * @returns {Promise<string>} Formatted ASCII tree
+ */
+async function buildTree(dir, prefix = '', depth = 0, maxDepth = 3) {
+    if (depth >= maxDepth) return '';
+
+    let entries;
+    try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+        return `${prefix}[permission denied]\n`;
+    }
+
+    // Filter out ignored entries
+    entries = entries.filter(entry => {
+        if (IGNORE_DIRS.has(entry.name) && entry.isDirectory()) return false;
+        if (IGNORE_FILES.has(entry.name)) return false;
+        if (IGNORE_EXTENSIONS.has(path.extname(entry.name))) return false;
+        return true;
+    });
+
+    // Sort: directories first, then files alphabetically
+    entries.sort((a, b) => {
+        if (a.isDirectory() && !b.isDirectory()) return -1;
+        if (!a.isDirectory() && b.isDirectory()) return 1;
+        return a.name.localeCompare(b.name);
+    });
+
+    let tree = '';
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const isLast = i === entries.length - 1;
+        const connector = isLast ? '└── ' : '├── ';
+        const childPrefix = isLast ? '    ' : '│   ';
+
+        if (entry.isDirectory()) {
+            tree += `${prefix}${connector}${entry.name}/\n`;
+            tree += await buildTree(path.join(dir, entry.name), prefix + childPrefix, depth + 1, maxDepth);
+        } else {
+            tree += `${prefix}${connector}${entry.name}\n`;
+        }
+    }
+
+    return tree;
+}
+
+/**
+ * Tool definition for listing the workspace directory tree.
+ * Returns a clean ASCII tree up to 3 levels deep, ignoring common noise directories.
+ */
+export const listDirTool = {
+    id: 'list_dir',
+    name: 'List Directory',
+    description: 'List the contents of a directory as a tree structure. Ignores node_modules, .git, dist, and lock files.',
+    enabled: false,
+    getTool: () => tool({
+        description: 'List the files and directories in a given path as an ASCII tree (max depth 3). Use this to explore the project structure before reading or editing files.',
+        parameters: z.object({
+            dirPath: z.string().optional().default('.').describe('Directory path to list (relative or absolute). Defaults to current working directory.'),
+        }),
+        execute: async ({ dirPath }) => {
+            try {
+                const resolvedDir = path.resolve(process.cwd(), dirPath || '.');
+                const rootName = path.basename(resolvedDir);
+
+                const tree = await buildTree(resolvedDir);
+                const result = `${rootName}/\n${tree}`;
+
+                console.log(chalk.cyan(`\n📂 Directory: ${resolvedDir}\n`));
+                console.log(result);
+
+                return result || `Directory "${dirPath}" is empty.`;
+            } catch (error) {
+                return `Error listing directory "${dirPath}": ${error.message}`;
+            }
+        }
+    })
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GREP SEARCH TOOL
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recursively search files for a text pattern.
+ * @param {string} dir - Directory to search
+ * @param {string} pattern - Text pattern to search for
+ * @param {string[]} extensions - File extensions to include (e.g. ['.js', '.ts'])
+ * @param {Array} results - Accumulator for matches
+ * @param {number} maxResults - Cap on total matches returned
+ * @returns {Promise<void>}
+ */
+async function searchFiles(dir, pattern, extensions, results, maxResults = 50) {
+    if (results.length >= maxResults) return;
+
+    let entries;
+    try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+        return;
+    }
+
+    for (const entry of entries) {
+        if (results.length >= maxResults) break;
+
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+            // Skip ignored directories
+            if (IGNORE_DIRS.has(entry.name)) continue;
+            await searchFiles(fullPath, pattern, extensions, results, maxResults);
+        } else {
+            // Filter by extension if specified
+            if (extensions.length > 0 && !extensions.includes(path.extname(entry.name))) {
+                continue;
+            }
+
+            try {
+                const content = await fs.readFile(fullPath, 'utf8');
+                const lines = content.split('\n');
+
+                for (let i = 0; i < lines.length; i++) {
+                    if (results.length >= maxResults) break;
+                    if (lines[i].includes(pattern)) {
+                        results.push({
+                            filePath: path.relative(process.cwd(), fullPath),
+                            lineNumber: i + 1,
+                            lineContent: lines[i].trim().substring(0, 200), // cap line length
+                        });
+                    }
+                }
+            } catch {
+                // Skip files that can't be read (e.g. binary files)
+            }
+        }
+    }
+}
+
+/**
+ * Tool definition for searching the codebase for a text pattern.
+ * Returns matching file paths, line numbers, and line content.
+ */
+export const grepSearchTool = {
+    id: 'grep_search',
+    name: 'Grep Search',
+    description: 'Search for a text pattern across files in the workspace. Returns matching file paths, line numbers, and content.',
+    enabled: false,
+    getTool: () => tool({
+        description: 'Search for a keyword, function name, or text pattern across files in the workspace. Use this to find where something is defined or used.',
+        parameters: z.object({
+            pattern: z.string().describe('The text pattern or keyword to search for (case-sensitive exact match)'),
+            dirPath: z.string().optional().default('.').describe('Directory to search in (relative or absolute). Defaults to cwd.'),
+            fileExtensions: z.array(z.string()).optional().default([]).describe('File extensions to filter, e.g. [".js", ".ts"]. Empty = all text files.'),
+        }),
+        execute: async ({ pattern, dirPath, fileExtensions }) => {
+            try {
+                const resolvedDir = path.resolve(process.cwd(), dirPath || '.');
+                const results = [];
+
+                await searchFiles(resolvedDir, pattern, fileExtensions || [], results);
+
+                if (results.length === 0) {
+                    return `No matches found for "${pattern}" in ${dirPath || '.'}.`;
+                }
+
+                console.log(chalk.cyan(`\n🔍 Found ${results.length} match(es) for "${pattern}":\n`));
+
+                const formatted = results.map(r =>
+                    `  ${chalk.gray(r.filePath)}:${chalk.yellow(r.lineNumber)} → ${r.lineContent}`
+                ).join('\n');
+                console.log(formatted + '\n');
+
+                // Return structured results for AI consumption
+                return JSON.stringify(results, null, 2);
+            } catch (error) {
+                return `Error searching for "${pattern}": ${error.message}`;
             }
         }
     })
