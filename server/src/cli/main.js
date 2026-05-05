@@ -20,6 +20,7 @@ import { doctorCommand } from "./commands/doctor/doctor.js";
 import { commitCommand } from "./commands/git/commit.js";
 import { reviewCommand } from "./commands/git/review.js";
 import { prReadyCommand } from "./commands/git/pr-ready.js";
+import { agentCommand } from "./commands/agent/agent.js";
 
 const pkg = JSON.parse(readFileSync(path.join(__dirname, "../../package.json"), "utf-8"));
 
@@ -49,6 +50,7 @@ async function main() {
     program.addCommand(commitCommand);
     program.addCommand(reviewCommand);
     program.addCommand(prReadyCommand);
+    program.addCommand(agentCommand);
 
     program
         .command("model")
