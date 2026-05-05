@@ -11,6 +11,47 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+function getBaseDir(baseDir) {
+    return (typeof baseDir === 'string' && baseDir.trim().length > 0) ? baseDir : process.cwd();
+}
+
+function safeResolve(baseDir, ...parts) {
+    const base = getBaseDir(baseDir);
+    const filtered = parts.filter(p => typeof p === 'string' && p.length > 0);
+    if (filtered.length === 0) {
+        throw new Error('Path is required.');
+    }
+    return path.resolve(base, ...filtered);
+}
+
+function isWindows() {
+    return process.platform === 'win32';
+}
+
+function translateCommandForWindows(command) {
+    if (!isWindows()) return command;
+    if (typeof command !== 'string') return command;
+
+    const trimmed = command.trim();
+    if (trimmed === 'ls') return 'dir';
+
+    // touch <file>  -> type nul > <file>
+    const touchMatch = trimmed.match(/^touch\s+(.+)$/);
+    if (touchMatch) {
+        const file = touchMatch[1].trim();
+        return `type nul > ${file}`;
+    }
+
+    // mkdir -p <dir> -> mkdir <dir>
+    const mkdirPMatch = trimmed.match(/^mkdir\s+-p\s+(.+)$/);
+    if (mkdirPMatch) {
+        const dir = mkdirPMatch[1].trim();
+        return `mkdir ${dir}`;
+    }
+
+    return command;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CHANGE TRACKER
 // Tracks files modified, files created, and commands executed during an agent
@@ -25,11 +66,13 @@ class ChangeTracker {
     }
 
     trackFileModified(filePath) {
-        this.filesModified.add(path.resolve(process.cwd(), filePath));
+        if (typeof filePath !== 'string' || filePath.trim().length === 0) return;
+        this.filesModified.add(safeResolve(undefined, filePath));
     }
 
     trackFileCreated(filePath) {
-        this.filesCreated.add(path.resolve(process.cwd(), filePath));
+        if (typeof filePath !== 'string' || filePath.trim().length === 0) return;
+        this.filesCreated.add(safeResolve(undefined, filePath));
     }
 
     trackCommand(command, success) {
@@ -84,13 +127,23 @@ function makeReadFileTool() {
     return tool({
         description: 'Read contents of one or multiple local files.',
         parameters: z.object({
-            filePaths: z.array(z.string()).describe('List of absolute or relative file paths to read. Example: ["src/index.js", "package.json"]'),
+            filePaths: z.array(z.string()).optional().describe('List of absolute or relative file paths to read. Example: ["src/index.js", "package.json"]'),
+            paths: z.array(z.string()).optional().describe('Alias of filePaths (some models send "paths").'),
+            files: z.array(z.string()).optional().describe('Alias of filePaths (some models send "files").'),
         }),
-        execute: async ({ filePaths }) => {
+        execute: async (params) => {
+            const files = params?.filePaths ?? params?.paths ?? params?.files ?? [];
+            if (!Array.isArray(files)) {
+                return 'Error: read_files expects "filePaths" (or alias "paths"/"files") to be an array of strings.';
+            }
             const results = [];
-            for (const fp of filePaths) {
+            for (const fp of files) {
                 try {
-                    const resolvedPath = path.resolve(process.cwd(), fp);
+                    if (typeof fp !== 'string' || fp.trim().length === 0) {
+                        results.push(`--- Error reading (empty path) ---: file path must be a non-empty string`);
+                        continue;
+                    }
+                    const resolvedPath = safeResolve(undefined, fp);
                     const content = await fs.readFile(resolvedPath, 'utf8');
                     results.push(`--- File: ${fp} ---\n${content}`);
                 } catch (err) {
@@ -111,7 +164,10 @@ function makeEditFileTool(autoApprove) {
         }),
         execute: async ({ filePath, newContent }) => {
             try {
-                const resolvedPath = path.resolve(process.cwd(), filePath);
+                if (typeof filePath !== 'string' || filePath.trim().length === 0) {
+                    return 'Failed to edit file: filePath must be a non-empty string.';
+                }
+                const resolvedPath = safeResolve(undefined, filePath);
                 let oldContent = '';
 
                 try {
@@ -159,7 +215,10 @@ function makeReplaceContentTool(autoApprove) {
         }),
         execute: async ({ filePath, targetContent, replacementContent }) => {
             try {
-                const resolvedPath = path.resolve(process.cwd(), filePath);
+                if (typeof filePath !== 'string' || filePath.trim().length === 0) {
+                    return 'Error: filePath must be a non-empty string.';
+                }
+                const resolvedPath = safeResolve(undefined, filePath);
                 let fileContent;
 
                 try {
@@ -214,8 +273,9 @@ function makeExecuteCommandTool(autoApprove) {
         }),
         execute: async ({ command }) => {
             try {
+                const translated = translateCommandForWindows(command);
                 console.log('\n');
-                console.log(chalk.cyan(`🤖 AI wants to run command: ${chalk.bold(command)}`));
+                console.log(chalk.cyan(`🤖 AI wants to run command: ${chalk.bold(translated)}`));
 
                 const approved = await shouldProceed(
                     chalk.cyan('Allow execution of this command?'),
@@ -224,15 +284,16 @@ function makeExecuteCommandTool(autoApprove) {
 
                 if (!approved) {
                     console.log(chalk.yellow('\n⚠️  Command execution aborted by user.\n'));
-                    changeTracker.trackCommand(command, false);
-                    return `User rejected the execution of command: ${command}.`;
+                    changeTracker.trackCommand(translated, false);
+                    return `User rejected the execution of command: ${translated}.`;
                 }
 
-                console.log(chalk.gray(`\nRunning: ${command}\n`));
+                console.log(chalk.gray(`\nRunning: ${translated}\n`));
 
-                const { stdout, stderr } = await execAsync(command, {
+                const { stdout, stderr } = await execAsync(translated, {
                     cwd: process.cwd(),
                     timeout: 120000, // 120s timeout — agent tasks may run longer
+                    shell: isWindows() ? 'cmd.exe' : undefined,
                 });
 
                 let result = '';
@@ -249,11 +310,11 @@ function makeExecuteCommandTool(autoApprove) {
                     result = 'Command executed successfully with no output.';
                 }
 
-                changeTracker.trackCommand(command, true);
+                changeTracker.trackCommand(translated, true);
                 console.log(chalk.green('\n✅ Command completed\n'));
                 return result;
             } catch (error) {
-                changeTracker.trackCommand(command, false);
+                changeTracker.trackCommand(typeof command === 'string' ? command : String(command), false);
                 console.error(chalk.red(`\n❌ Command failed: ${error.message}\n`));
                 if (error.stdout) console.log(error.stdout);
                 if (error.stderr) console.error(chalk.yellow(error.stderr));
@@ -313,7 +374,7 @@ function makeListDirTool() {
         }),
         execute: async ({ dirPath }) => {
             try {
-                const resolvedDir = path.resolve(process.cwd(), dirPath || '.');
+                const resolvedDir = safeResolve(undefined, (typeof dirPath === 'string' && dirPath.trim().length > 0) ? dirPath : '.');
                 const rootName = path.basename(resolvedDir);
                 const tree = await buildTree(resolvedDir);
                 const result = `${rootName}/\n${tree}`;

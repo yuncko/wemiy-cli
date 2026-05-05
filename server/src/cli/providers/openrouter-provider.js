@@ -77,6 +77,9 @@ export class OpenRouterProvider extends BaseProvider {
         const config = configManager.getConfig();
         this.apiKey = config?.openrouter?.apiKey;
         this.modelId = config?.openrouter?.model;
+        this.maxTokens = Number.isFinite(config?.openrouter?.maxTokens)
+            ? config.openrouter.maxTokens
+            : 2048;
 
         if (!this.apiKey) {
             throw new Error("OpenRouter API Key is not configured. Use /model to set it up.");
@@ -135,6 +138,7 @@ export class OpenRouterProvider extends BaseProvider {
                 model: this.modelId,
                 messages: apiMessages,
                 stream: true,
+                max_tokens: this.maxTokens,
             };
 
             // Convert AI SDK tool definitions to OpenAI function-calling format.
