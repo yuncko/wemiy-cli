@@ -8,6 +8,7 @@ import yoctoSpinner from "yocto-spinner";
 import { configManager } from "../../config/config-manager.js";
 import { GeminiProvider } from "../../providers/gemini-provider.js";
 import { OpenRouterProvider } from "../../providers/openrouter-provider.js";
+import { SwiftRouterProvider } from "../../providers/swiftrouter-provider.js";
 import { generateDiffPreview } from "../../lib/diff-preview.js";
 import { undoManager } from "../../lib/undo-manager.js";
 import { debug } from "../../../lib/debug.js";
@@ -35,6 +36,9 @@ function getProvider() {
 
     if (provider === "openrouter") {
         return new OpenRouterProvider();
+    }
+    if (provider === "swiftrouter") {
+        return new SwiftRouterProvider();
     }
     return new GeminiProvider();
 }

@@ -13,7 +13,12 @@ export class ConfigManager {
         if (!fs.existsSync(this.configFile)) {
             return {
                 provider: "gemini",
+                swiftrouter_api_key: "",
                 openrouter: {
+                    apiKey: "",
+                    model: ""
+                },
+                swiftrouter: {
                     apiKey: "",
                     model: ""
                 }
@@ -23,7 +28,7 @@ export class ConfigManager {
             return JSON.parse(fs.readFileSync(this.configFile, 'utf-8'));
         } catch (error) {
             console.error(chalk.red("Failed to read config file"));
-            return { provider: "gemini" };
+            return { provider: "gemini", swiftrouter_api_key: "" };
         }
     }
 
@@ -41,6 +46,9 @@ export class ConfigManager {
         }
         if (provider === 'openrouter') {
             return config?.openrouter?.model;
+        }
+        if (provider === 'swiftrouter') {
+            return config?.swiftrouter?.model;
         }
         return null;
     }

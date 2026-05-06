@@ -76,6 +76,9 @@ async function initAIService() {
         if (provider === 'openrouter') {
             const { OpenRouterProvider } = await import('../providers/openrouter-provider.js');
             return new OpenRouterProvider();
+        } else if (provider === 'swiftrouter') {
+            const { SwiftRouterProvider } = await import('../providers/swiftrouter-provider.js');
+            return new SwiftRouterProvider();
         } else {
             const { GeminiProvider } = await import('../providers/gemini-provider.js');
             return new GeminiProvider();

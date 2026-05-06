@@ -12,6 +12,7 @@ import os from "os";
 import { configManager } from "../../config/config-manager.js";
 import { GeminiProvider } from "../../providers/gemini-provider.js";
 import { OpenRouterProvider } from "../../providers/openrouter-provider.js";
+import { SwiftRouterProvider } from "../../providers/swiftrouter-provider.js";
 import { debug } from "../../../lib/debug.js";
 
 const execAsync = promisify(exec);
@@ -22,6 +23,9 @@ function getProvider() {
     debug(`Using provider: ${provider}`);
     if (provider === "openrouter") {
         return new OpenRouterProvider();
+    }
+    if (provider === "swiftrouter") {
+        return new SwiftRouterProvider();
     }
     return new GeminiProvider();
 }

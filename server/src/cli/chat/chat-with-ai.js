@@ -30,6 +30,9 @@ async function initAIService() {
         if (provider === 'openrouter') {
             const { OpenRouterProvider } = await import("../providers/openrouter-provider.js");
             aiService = new OpenRouterProvider();
+        } else if (provider === 'swiftrouter') {
+            const { SwiftRouterProvider } = await import("../providers/swiftrouter-provider.js");
+            aiService = new SwiftRouterProvider();
         } else {
             const { GeminiProvider } = await import("../providers/gemini-provider.js");
             aiService = new GeminiProvider();
@@ -39,7 +42,13 @@ async function initAIService() {
         console.log(chalk.yellow("Falling back to Gemini..."));
         
         // Save fallback to config
-        configManager.saveConfig({ provider: "gemini", openrouter: { apiKey: "", model: "" } });
+        const current = configManager.getConfig();
+        configManager.saveConfig({
+            provider: "gemini",
+            swiftrouter_api_key: current.swiftrouter_api_key || current.swiftrouter?.apiKey || "",
+            openrouter: current.openrouter || { apiKey: "", model: "" },
+            swiftrouter: current.swiftrouter || { apiKey: "", model: "" },
+        });
         const { GeminiProvider } = await import("../providers/gemini-provider.js");
         aiService = new GeminiProvider();
     }

@@ -54,7 +54,7 @@ async function main() {
 
     program
         .command("model")
-        .description("Select AI model (OpenRouter)")
+        .description("Select AI model (Gemini, OpenRouter, SwiftRouter)")
         .action(selectModelCommand);
 
     // Default action shows help

@@ -7,6 +7,7 @@ import yoctoSpinner from "yocto-spinner";
 import { configManager } from "../../config/config-manager.js";
 import { GeminiProvider } from "../../providers/gemini-provider.js";
 import { OpenRouterProvider } from "../../providers/openrouter-provider.js";
+import { SwiftRouterProvider } from "../../providers/swiftrouter-provider.js";
 import { debug } from "../../../lib/debug.js";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -21,6 +22,9 @@ function getProvider() {
     debug(`Using provider: ${provider}`);
     if (provider === "openrouter") {
         return new OpenRouterProvider();
+    }
+    if (provider === "swiftrouter") {
+        return new SwiftRouterProvider();
     }
     return new GeminiProvider();
 }

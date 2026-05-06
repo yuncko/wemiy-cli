@@ -3,6 +3,7 @@ import { z } from "zod";
 import { configManager } from "../config/config-manager.js";
 import { GeminiProvider } from "../providers/gemini-provider.js";
 import { OpenRouterProvider } from "../providers/openrouter-provider.js";
+import { SwiftRouterProvider } from "../providers/swiftrouter-provider.js";
 import { readFileContent } from "../utils/file-scanner.js";
 import { debug } from "../../lib/debug.js";
 
@@ -32,6 +33,9 @@ function getProvider() {
 
     if (provider === "openrouter") {
         return new OpenRouterProvider();
+    }
+    if (provider === "swiftrouter") {
+        return new SwiftRouterProvider();
     }
     return new GeminiProvider();
 }

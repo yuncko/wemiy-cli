@@ -10,6 +10,8 @@ const MODEL_OPTIONS = [
     { value: "google/gemini-2.5-flash-preview", label: "Gemini 2.5 Flash", hint: "OpenRouter" },
     { value: "meta-llama/llama-4-maverick", label: "Llama 4 Maverick", hint: "OpenRouter" },
     { value: "mistralai/mistral-small-3.2-24b-instruct", label: "Mistral Small 3.2", hint: "OpenRouter" },
+    { value: "gpt-5.2", label: "GPT 5.2", hint: "SwiftRouter" },
+    { value: "glm-5.1", label: "GLM 5.1", hint: "SwiftRouter" },
 ];
 
 export async function selectModelCommand() {
@@ -26,7 +28,9 @@ export async function selectModelCommand() {
     if (selected === "gemini") {
         configManager.saveConfig({
             provider: "gemini",
-            openrouter: configManager.getConfig().openrouter || { apiKey: "", model: "" }
+            swiftrouter_api_key: configManager.getConfig().swiftrouter_api_key || "",
+            openrouter: configManager.getConfig().openrouter || { apiKey: "", model: "" },
+            swiftrouter: configManager.getConfig().swiftrouter || { apiKey: "", model: "" },
         });
 
         console.log(boxen(
@@ -41,15 +45,19 @@ export async function selectModelCommand() {
         return;
     }
 
-    // OpenRouter model selected — ensure API key
-    let apiKey = configManager.getConfig().openrouter?.apiKey;
+    const isSwiftRouterModel = ["gpt-5.2", "glm-5.1"].includes(selected);
+    const providerName = isSwiftRouterModel ? "swiftrouter" : "openrouter";
+
+    let apiKey = isSwiftRouterModel
+        ? configManager.getConfig().swiftrouter?.apiKey
+        : configManager.getConfig().openrouter?.apiKey;
+
     if (!apiKey) {
         const keyInput = await password({
-            message: "Enter your OpenRouter API key",
+            message: isSwiftRouterModel ? "Enter your SwiftRouter API key" : "Enter your OpenRouter API key",
             mask: "*",
             validate: (value) => {
                 if (!value) return "API key is required";
-                if (!value.startsWith("sk-")) return 'API key must start with "sk-"';
             }
         });
 
@@ -59,12 +67,18 @@ export async function selectModelCommand() {
         apiKey = keyInput;
     }
 
+    const current = configManager.getConfig();
     configManager.saveConfig({
-        provider: "openrouter",
-        openrouter: {
-            apiKey: apiKey,
-            model: selected
-        }
+        provider: providerName,
+        swiftrouter_api_key: isSwiftRouterModel
+            ? apiKey
+            : (current.swiftrouter_api_key || current.swiftrouter?.apiKey || ""),
+        openrouter: isSwiftRouterModel
+            ? (current.openrouter || { apiKey: "", model: "" })
+            : { apiKey, model: selected },
+        swiftrouter: isSwiftRouterModel
+            ? { apiKey, model: selected }
+            : (current.swiftrouter || { apiKey: "", model: "" }),
     });
 
     const selectedOption = MODEL_OPTIONS.find(opt => opt.value === selected);

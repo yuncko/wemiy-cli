@@ -1,6 +1,7 @@
 export const MODEL_PROVIDERS = {
     GEMINI: 'gemini',
-    OPENROUTER: 'openrouter'
+    OPENROUTER: 'openrouter',
+    SWIFTROUTER: 'swiftrouter'
 };
 
 export const MODELS = [
@@ -23,6 +24,16 @@ export const MODELS = [
         name: "MiniMax M2.5",
         id: "minimax/minimax-m2.5:free",
         provider: MODEL_PROVIDERS.OPENROUTER
+    },
+    {
+        name: "GPT 5.2",
+        id: "gpt-5.2",
+        provider: MODEL_PROVIDERS.SWIFTROUTER
+    },
+    {
+        name: "GLM 5.1",
+        id: "glm-5.1",
+        provider: MODEL_PROVIDERS.SWIFTROUTER
     }
 ];
 
