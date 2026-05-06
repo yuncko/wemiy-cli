@@ -159,7 +159,7 @@ function makeEditFileTool(autoApprove) {
     return tool({
         description: 'Edit a file by completely replacing its content. Use replace_content instead for targeted edits.',
         parameters: z.object({
-            filePath: z.string().describe('Path to the file to edit'),
+            filePath: z.string().describe('Path to the file to edit. Example: "src/index.js"'),
             newContent: z.string().describe('The complete new content of the file.'),
         }),
         execute: async ({ filePath, newContent }) => {
@@ -209,7 +209,7 @@ function makeReplaceContentTool(autoApprove) {
     return tool({
         description: 'Replace a specific block of text inside a file. Preferred way to edit files.',
         parameters: z.object({
-            filePath: z.string().describe('Path to the file to edit (relative or absolute)'),
+            filePath: z.string().describe('Path to the file to edit (relative or absolute). Example: "src/app.js"'),
             targetContent: z.string().describe('The exact block of text to find in the file.'),
             replacementContent: z.string().describe('The new block of text to replace the target with.'),
         }),
@@ -269,7 +269,7 @@ function makeExecuteCommandTool(autoApprove) {
     return tool({
         description: 'Run a shell command in the current workspace.',
         parameters: z.object({
-            command: z.string().describe('The shell command to execute, e.g. "npm test" or "npx tsc"'),
+            command: z.string().describe('The shell command to execute on Windows CMD. Example: "dir", "npm test", or "npx tsc"'),
         }),
         execute: async ({ command }) => {
             try {
@@ -370,11 +370,14 @@ function makeListDirTool() {
     return tool({
         description: 'List the files and directories in a given path as an ASCII tree (max depth 3).',
         parameters: z.object({
-            dirPath: z.string().optional().default('.').describe('Directory path to list. Defaults to cwd.'),
+            path: z.string().optional().describe('Directory path to list. Example: "." or "src".'),
+            dirPath: z.string().optional().default('.').describe('Alias of path. Directory path to list. Defaults to cwd.'),
         }),
-        execute: async ({ dirPath }) => {
+        execute: async (params) => {
             try {
-                const resolvedDir = safeResolve(undefined, (typeof dirPath === 'string' && dirPath.trim().length > 0) ? dirPath : '.');
+                const requestedPath = params?.path ?? params?.dirPath ?? '.';
+                const dirPath = (typeof requestedPath === 'string' && requestedPath.trim().length > 0) ? requestedPath : '.';
+                const resolvedDir = safeResolve(undefined, dirPath);
                 const rootName = path.basename(resolvedDir);
                 const tree = await buildTree(resolvedDir);
                 const result = `${rootName}/\n${tree}`;
@@ -438,19 +441,21 @@ function makeGrepSearchTool() {
     return tool({
         description: 'Search for a keyword or text pattern across files in the workspace.',
         parameters: z.object({
-            pattern: z.string().describe('The text pattern to search for (case-sensitive)'),
-            dirPath: z.string().optional().default('.').describe('Directory to search in. Defaults to cwd.'),
+            pattern: z.string().describe('The text pattern to search for (case-sensitive). Example: "sendMessage("'),
+            path: z.string().optional().describe('Directory to search in. Example: "." or "src".'),
+            dirPath: z.string().optional().default('.').describe('Alias of path. Directory to search in. Defaults to cwd.'),
             fileExtensions: z.array(z.string()).optional().default([]).describe('File extensions to filter, e.g. [".js", ".ts"]. Empty = all.'),
         }),
-        execute: async ({ pattern, dirPath, fileExtensions }) => {
+        execute: async ({ pattern, path: searchPath, dirPath, fileExtensions }) => {
             try {
-                const resolvedDir = path.resolve(process.cwd(), dirPath || '.');
+                const requestedPath = searchPath || dirPath || '.';
+                const resolvedDir = path.resolve(process.cwd(), requestedPath);
                 const results = [];
 
                 await searchFiles(resolvedDir, pattern, fileExtensions || [], results);
 
                 if (results.length === 0) {
-                    return `No matches found for "${pattern}" in ${dirPath || '.'}.`;
+                    return `No matches found for "${pattern}" in ${requestedPath}.`;
                 }
 
                 console.log(chalk.cyan(`\n🔍 Found ${results.length} match(es) for "${pattern}":\n`));

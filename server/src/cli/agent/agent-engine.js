@@ -7,6 +7,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { configManager } from '../config/config-manager.js';
 import { getAgentTools, changeTracker, AGENT_TOOL_IDS } from '../lib/fs-tools-auto.js';
+import { availableTools, enableTools, getEnabledTools, resetTools } from '../../config/tool.config.js';
 
 const execAsync = promisify(exec);
 
@@ -58,7 +59,14 @@ Rules:
 - After editing, verify your changes work by running relevant commands.
 - If tests fail, read the error and fix the code. Keep iterating until it passes.
 - Be concise in your explanations. Focus on doing, not describing what you would do.
-- When your task is complete, provide a brief summary of what you did.`;
+- When your task is complete, provide a brief summary of what you did.
+
+Tool argument format (always pass explicit arguments, never {}):
+- list_dir: {"path":"."}
+- execute_command: {"command":"dir"}
+- read_files: {"filePaths":["src/index.js"]}
+- grep_search: {"pattern":"sendMessage(", "path":"src"}
+- replace_content: {"filePath":"src/file.js","targetContent":"old","replacementContent":"new"};`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROVIDER INITIALIZATION
@@ -227,13 +235,14 @@ function displaySummary(report, verificationPassed) {
  * @param {Object} toolInput - Arguments to pass to the tool
  * @returns {Promise<string>} The tool execution result as a string
  */
-async function executeTool(tools, toolName, toolInput) {
-    const toolInstance = tools[toolName];
-    if (!toolInstance) {
-        return `Error: Tool "${toolName}" not found. Available tools: ${Object.keys(tools).join(', ')}`;
+async function executeTool(toolName, toolInput) {
+    const toolConfig = availableTools.find(t => t.id === toolName);
+    if (!toolConfig) {
+        return `Error: Tool "${toolName}" not found. Available tools: ${AGENT_TOOL_IDS.join(', ')}`;
     }
 
     try {
+        const toolInstance = toolConfig.getTool();
         if (toolInstance.execute) {
             return await toolInstance.execute(toolInput);
         }
@@ -369,7 +378,7 @@ Follow this plan. Execute each step using the tools available to you. When done,
             displayStep('Tool Call', '🔧', 'cyan', toolName);
             displayToolCall({ name: toolName, input: toolInput });
 
-            const toolResult = await executeTool(tools, toolName, toolInput);
+            const toolResult = await executeTool(toolName, toolInput);
 
             displayStep('Result', '📊', 'green', toolName);
             displayToolResult(toolName, typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult));
@@ -537,7 +546,15 @@ export async function runAgent(task, options = {}) {
     // Reset change tracker
     changeTracker.reset();
 
-    const tools = getAgentTools(autoApprove);
+    // Match chat-with-ai-agent.js tool registration/passing pattern.
+    // Keep auto-approve behavior by using fs-tools-auto variants when requested.
+    let tools;
+    if (autoApprove) {
+        tools = getAgentTools(true);
+    } else {
+        enableTools(AGENT_TOOL_IDS);
+        tools = getEnabledTools();
+    }
     const agentResponse = await executeAgentLoop(task, plan, tools, aiService, { maxIterations });
 
     // ── Phase 3: Verification ───────────────────────────────────────
@@ -597,6 +614,9 @@ export async function runAgent(task, options = {}) {
             )
         );
     }
+
+    // Clean up tool state for subsequent runs.
+    resetTools();
 
     console.log(chalk.green.bold('\n✨ Agent task complete!\n'));
 }

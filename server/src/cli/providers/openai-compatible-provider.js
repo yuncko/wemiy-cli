@@ -10,38 +10,44 @@ import chalk from "chalk";
  */
 function extractZodJsonSchema(zodSchema) {
     try {
-        const def = zodSchema._def;
+        const def = zodSchema?._def || zodSchema?.def;
         if (!def) return {};
 
-        if (def.typeName === "ZodObject" && def.shape) {
+        const schemaType = def.typeName || def.type;
+        if ((schemaType === "ZodObject" || schemaType === "object") && def.shape) {
             const properties = {};
             const required = [];
             const shape = typeof def.shape === "function" ? def.shape() : def.shape;
 
             for (const [key, value] of Object.entries(shape)) {
-                const propDef = value._def || {};
+                const propDef = value?._def || value?.def || {};
+                const propType = propDef.typeName || propDef.type || value?.type;
                 let propSchema = { type: "string" };
 
-                if (propDef.typeName === "ZodString") {
+                if (propType === "ZodString" || propType === "string") {
                     propSchema = { type: "string" };
-                } else if (propDef.typeName === "ZodNumber") {
+                } else if (propType === "ZodNumber" || propType === "number") {
                     propSchema = { type: "number" };
-                } else if (propDef.typeName === "ZodBoolean") {
+                } else if (propType === "ZodBoolean" || propType === "boolean") {
                     propSchema = { type: "boolean" };
-                } else if (propDef.typeName === "ZodArray") {
+                } else if (propType === "ZodArray" || propType === "array") {
                     propSchema = { type: "array", items: { type: "string" } };
-                } else if (propDef.typeName === "ZodOptional") {
-                    propSchema = { type: "string" };
-                } else if (propDef.typeName === "ZodDefault") {
-                    propSchema = { type: "string" };
+                } else if (propType === "ZodOptional" || propType === "optional") {
+                    const inner = propDef.innerType || propDef.type;
+                    const innerSchema = inner ? extractZodJsonSchema(inner) : {};
+                    propSchema = (innerSchema && Object.keys(innerSchema).length > 0) ? innerSchema : { type: "string" };
+                } else if (propType === "ZodDefault" || propType === "default") {
+                    const inner = propDef.innerType;
+                    const innerSchema = inner ? extractZodJsonSchema(inner) : {};
+                    propSchema = (innerSchema && Object.keys(innerSchema).length > 0) ? innerSchema : { type: "string" };
                 }
 
-                if (propDef.description) {
-                    propSchema.description = propDef.description;
+                if (value?.description || propDef.description) {
+                    propSchema.description = value?.description || propDef.description;
                 }
 
                 properties[key] = propSchema;
-                if (propDef.typeName !== "ZodOptional" && propDef.typeName !== "ZodDefault") {
+                if (propType !== "ZodOptional" && propType !== "optional" && propType !== "ZodDefault" && propType !== "default") {
                     required.push(key);
                 }
             }
