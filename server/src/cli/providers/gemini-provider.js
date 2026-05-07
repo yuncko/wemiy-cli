@@ -1,10 +1,59 @@
 import { google } from "@ai-sdk/google";
-import { streamText, generateObject } from "ai";
+import { streamText, generateObject, stepCountIs } from "ai";
 import { config } from "../../config/google.config.js";
 import { debug } from "../../lib/debug.js";
 import { BaseProvider } from "./base-provider.js";
 import chalk from "chalk";
 import { configManager } from "../config/config-manager.js";
+
+/**
+ * Convert messages from the agent loop's loose shape into the canonical
+ * AI SDK v5 ModelMessage format. The agent loop pushes:
+ *   - { role: 'assistant', content: 'text'|null, toolCalls: [...] }
+ *   - { role: 'tool', toolCallId, toolName, content: 'string' }
+ * Both shapes are illegal for streamText in v5, which expects content parts.
+ */
+function toModelMessages(messages) {
+    return messages.map((m) => {
+        if (m.role === "assistant" && Array.isArray(m.toolCalls) && m.toolCalls.length > 0) {
+            const parts = [];
+            if (m.content && typeof m.content === "string" && m.content.trim().length > 0) {
+                parts.push({ type: "text", text: m.content });
+            }
+            for (const tc of m.toolCalls) {
+                parts.push({
+                    type: "tool-call",
+                    toolCallId: tc.id || tc.toolCallId,
+                    toolName: tc.name || tc.toolName,
+                    input: tc.input ?? tc.args ?? {},
+                });
+            }
+            return { role: "assistant", content: parts };
+        }
+
+        if (m.role === "tool") {
+            const rawContent = typeof m.content === "string"
+                ? m.content
+                : JSON.stringify(m.content ?? "");
+            return {
+                role: "tool",
+                content: [
+                    {
+                        type: "tool-result",
+                        toolCallId: m.toolCallId || m.tool_call_id,
+                        toolName: m.toolName || "unknown_tool",
+                        output: { type: "text", value: rawContent },
+                    },
+                ],
+            };
+        }
+
+        if (typeof m.content !== "string") {
+            return { role: m.role, content: JSON.stringify(m.content ?? "") };
+        }
+        return { role: m.role, content: m.content };
+    });
+}
 
 export class GeminiProvider extends BaseProvider {
     constructor() {
@@ -24,16 +73,18 @@ export class GeminiProvider extends BaseProvider {
         try {
             const streamConfig = {
                 model: this.model,
-                messages: messages,
+                messages: toModelMessages(messages),
             };
 
-            // Add tools if provided with maxSteps for multi-step tool calling
             if (tools && Object.keys(tools).length > 0) {
                 streamConfig.tools = tools;
-                streamConfig.maxSteps = 5;
+                // The agent loop drives multi-turn tool calling. We let the SDK
+                // perform a single step (LLM call + auto-execute tools) per
+                // sendMessage call. Default stopWhen is stepCountIs(1), but we
+                // make it explicit for clarity.
+                streamConfig.stopWhen = stepCountIs(1);
 
                 debug(`Tools enabled: ${Object.keys(tools).join(', ')}`);
-                debug(`maxSteps set to ${streamConfig.maxSteps}`);
             }
 
             const result = streamText(streamConfig);
@@ -46,34 +97,48 @@ export class GeminiProvider extends BaseProvider {
                 }
             }
 
-            const fullResult = result;
-            const toolCalls = [];
-            const toolResults = [];
+            // In AI SDK v5, all of these are Promises that must be awaited.
+            const [stepsRaw, finishReason, usage, toolCallsRaw, toolResultsRaw] = await Promise.all([
+                result.steps,
+                result.finishReason,
+                result.usage,
+                result.toolCalls,
+                result.toolResults,
+            ]);
 
-            if (fullResult.steps && Array.isArray(fullResult.steps)) {
-                for (const step of fullResult.steps) {
-                    if (step.toolCalls && step.toolCalls.length > 0) {
-                        for (const toolCall of step.toolCalls) {
-                            toolCalls.push(toolCall);
-                            if (onToolCall) {
-                                onToolCall(toolCall);
-                            }
-                        }
-                    }
+            const toolCalls = (toolCallsRaw || []).map((tc) => ({
+                id: tc.toolCallId,
+                name: tc.toolName,
+                toolName: tc.toolName,
+                input: tc.input,
+                args: tc.input,
+            }));
 
-                    if (step.toolResults && step.toolResults.length > 0) {
-                        toolResults.push(...step.toolResults);
-                    }
-                }
+            if (onToolCall) {
+                for (const tc of toolCalls) onToolCall(tc);
             }
+
+            const toolResults = (toolResultsRaw || []).map((tr) => {
+                const output = tr.output;
+                let resultValue = output;
+                if (output && typeof output === "object" && "value" in output) {
+                    resultValue = output.value;
+                }
+                return {
+                    toolCallId: tr.toolCallId,
+                    toolName: tr.toolName,
+                    output,
+                    result: resultValue,
+                };
+            });
 
             return {
                 content: fullResponse,
-                finishReason: fullResult.finishReason,
-                usage: fullResult.usage,
+                finishReason,
+                usage,
                 toolCalls,
                 toolResults,
-                steps: fullResult.steps,
+                steps: stepsRaw || [],
             };
         } catch (error) {
             console.error(chalk.red(`\nAI Service Error:`), error.message);

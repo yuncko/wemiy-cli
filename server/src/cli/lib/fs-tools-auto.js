@@ -126,7 +126,7 @@ async function shouldProceed(message, autoApprove) {
 function makeReadFileTool() {
     return tool({
         description: 'Read contents of one or multiple local files.',
-        parameters: z.object({
+        inputSchema: z.object({
             filePaths: z.array(z.string()).optional().describe('List of absolute or relative file paths to read. Example: ["src/index.js", "package.json"]'),
             paths: z.array(z.string()).optional().describe('Alias of filePaths (some models send "paths").'),
             files: z.array(z.string()).optional().describe('Alias of filePaths (some models send "files").'),
@@ -158,7 +158,7 @@ function makeReadFileTool() {
 function makeEditFileTool(autoApprove) {
     return tool({
         description: 'Edit a file by completely replacing its content. Use replace_content instead for targeted edits.',
-        parameters: z.object({
+        inputSchema: z.object({
             filePath: z.string().describe('Path to the file to edit. Example: "src/index.js"'),
             newContent: z.string().describe('The complete new content of the file.'),
         }),
@@ -208,7 +208,7 @@ function makeEditFileTool(autoApprove) {
 function makeReplaceContentTool(autoApprove) {
     return tool({
         description: 'Replace a specific block of text inside a file. Preferred way to edit files.',
-        parameters: z.object({
+        inputSchema: z.object({
             filePath: z.string().describe('Path to the file to edit (relative or absolute). Example: "src/app.js"'),
             targetContent: z.string().describe('The exact block of text to find in the file.'),
             replacementContent: z.string().describe('The new block of text to replace the target with.'),
@@ -268,7 +268,7 @@ function makeReplaceContentTool(autoApprove) {
 function makeExecuteCommandTool(autoApprove) {
     return tool({
         description: 'Run a shell command in the current workspace.',
-        parameters: z.object({
+        inputSchema: z.object({
             command: z.string().describe('The shell command to execute on Windows CMD. Example: "dir", "npm test", or "npx tsc"'),
         }),
         execute: async ({ command }) => {
@@ -369,7 +369,7 @@ function makeListDirTool() {
 
     return tool({
         description: 'List the files and directories in a given path as an ASCII tree (max depth 3).',
-        parameters: z.object({
+        inputSchema: z.object({
             path: z.string().optional().describe('Directory path to list. Example: "." or "src".'),
             dirPath: z.string().optional().default('.').describe('Alias of path. Directory path to list. Defaults to cwd.'),
         }),
@@ -440,7 +440,7 @@ function makeGrepSearchTool() {
 
     return tool({
         description: 'Search for a keyword or text pattern across files in the workspace.',
-        parameters: z.object({
+        inputSchema: z.object({
             pattern: z.string().describe('The text pattern to search for (case-sensitive). Example: "sendMessage("'),
             path: z.string().optional().describe('Directory to search in. Example: "." or "src".'),
             dirPath: z.string().optional().default('.').describe('Alias of path. Directory to search in. Defaults to cwd.'),

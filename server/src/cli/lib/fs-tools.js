@@ -65,7 +65,7 @@ export const readFileTool = {
     enabled: false,
     getTool: () => tool({
         description: 'Read contents of one or multiple local files.',
-        parameters: z.object({
+        inputSchema: z.object({
             filePaths: z.array(z.string()).optional().describe('List of absolute or relative file paths to read. Example: ["src/index.js", "package.json"]'),
             paths: z.array(z.string()).optional().describe('Alias of filePaths (some models send "paths").'),
             files: z.array(z.string()).optional().describe('Alias of filePaths (some models send "files").'),
@@ -109,7 +109,7 @@ export const editFileTool = {
     enabled: false,
     getTool: () => tool({
         description: 'Edit a file by completely replacing its content. DEPRECATED for large files — use replace_content instead for targeted edits.',
-        parameters: z.object({
+        inputSchema: z.object({
             filePath: z.string().describe('Path to the file to edit'),
             newContent: z.string().describe('The complete new content of the file. DO NOT output partial snippets, provide the entire updated file content.'),
         }),
@@ -177,7 +177,7 @@ export const replaceContentTool = {
     enabled: false,
     getTool: () => tool({
         description: 'Replace a specific block of text inside a file. You must provide the exact text to find and its replacement. This is the preferred way to edit files.',
-        parameters: z.object({
+        inputSchema: z.object({
             filePath: z.string().describe('Path to the file to edit (relative or absolute)'),
             targetContent: z.string().describe('The exact block of text to find in the file. Must match exactly including whitespace and indentation.'),
             replacementContent: z.string().describe('The new block of text to replace the target with.'),
@@ -258,7 +258,7 @@ export const executeCommandTool = {
     enabled: false,
     getTool: () => tool({
         description: 'Run a shell command in the current workspace. Use this to verify code by running tests, linters, or build scripts.',
-        parameters: z.object({
+        inputSchema: z.object({
             command: z.string().describe('The shell command to execute, e.g. "npm test" or "npx tsc"'),
         }),
         execute: async ({ command }) => {
@@ -386,7 +386,7 @@ export const listDirTool = {
     enabled: false,
     getTool: () => tool({
         description: 'List the files and directories in a given path as an ASCII tree (max depth 3). Use this to explore the project structure before reading or editing files.',
-        parameters: z.object({
+        inputSchema: z.object({
             dirPath: z.string().optional().default('.').describe('Directory path to list (relative or absolute). Defaults to current working directory.'),
         }),
         execute: async ({ dirPath }) => {
@@ -478,7 +478,7 @@ export const grepSearchTool = {
     enabled: false,
     getTool: () => tool({
         description: 'Search for a keyword, function name, or text pattern across files in the workspace. Use this to find where something is defined or used.',
-        parameters: z.object({
+        inputSchema: z.object({
             pattern: z.string().describe('The text pattern or keyword to search for (case-sensitive exact match)'),
             dirPath: z.string().optional().default('.').describe('Directory to search in (relative or absolute). Defaults to cwd.'),
             fileExtensions: z.array(z.string()).optional().default([]).describe('File extensions to filter, e.g. [".js", ".ts"]. Empty = all text files.'),

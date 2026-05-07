@@ -138,16 +138,19 @@ export class OpenAICompatibleProvider extends BaseProvider {
             if (tools && Object.keys(tools).length > 0) {
                 const toolDefs = [];
                 for (const [name, toolDef] of Object.entries(tools)) {
+                    // AI SDK v5 uses `inputSchema`. Older code paths may still
+                    // expose `parameters`. Accept both for resilience.
+                    const schemaSource = toolDef.inputSchema || toolDef.parameters;
                     let parameters = {};
-                    if (toolDef.parameters) {
-                        if (typeof toolDef.parameters.jsonSchema === "object") {
-                            parameters = toolDef.parameters.jsonSchema;
-                        } else if (typeof toolDef.parameters.jsonSchema === "function") {
-                            parameters = toolDef.parameters.jsonSchema();
-                        } else if (toolDef.parameters._def) {
-                            parameters = extractZodJsonSchema(toolDef.parameters);
+                    if (schemaSource) {
+                        if (typeof schemaSource.jsonSchema === "object") {
+                            parameters = schemaSource.jsonSchema;
+                        } else if (typeof schemaSource.jsonSchema === "function") {
+                            parameters = schemaSource.jsonSchema();
+                        } else if (schemaSource._def) {
+                            parameters = extractZodJsonSchema(schemaSource);
                         } else {
-                            parameters = toolDef.parameters;
+                            parameters = schemaSource;
                         }
                     }
 
