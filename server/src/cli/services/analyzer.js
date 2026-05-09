@@ -6,6 +6,11 @@ import { OpenRouterProvider } from "../providers/openrouter-provider.js";
 import { SwiftRouterProvider } from "../providers/swiftrouter-provider.js";
 import { readFileContent } from "../utils/file-scanner.js";
 import { debug } from "../../lib/debug.js";
+import {
+    doctorCacheKeyForContent,
+    readDoctorCache,
+    writeDoctorCache,
+} from "../lib/doctor-cache.js";
 
 // ── Zod schema for a single issue ──────────────────────────────────
 export const IssueSchema = z.object({
@@ -21,8 +26,38 @@ export const AnalysisResultSchema = z.object({
     issues: z.array(IssueSchema),
 });
 
-// ── Constants ───────────────────────────────────────────────────────
-const BATCH_SIZE = 5;
+/** Rough prompt budget per batch (characters of file contents + overhead) */
+const DEFAULT_MAX_CHARS_PER_BATCH = 52_000;
+
+function normalizeRel(p) {
+    return String(p || "")
+        .replace(/\\/g, "/")
+        .replace(/^\.\/+/, "");
+}
+
+function buildCharBatches(items, maxChars) {
+    const batches = [];
+    let current = [];
+    let sum = 0;
+
+    for (const item of items) {
+        const len = item.content.length;
+        if (current.length > 0 && sum + len > maxChars) {
+            batches.push(current);
+            current = [];
+            sum = 0;
+        }
+        current.push(item);
+        sum += len;
+        if (sum >= maxChars) {
+            batches.push(current);
+            current = [];
+            sum = 0;
+        }
+    }
+    if (current.length) batches.push(current);
+    return batches;
+}
 
 // ── Provider factory (same pattern as fixFile.js) ───────────────────
 function getProvider() {
@@ -71,12 +106,11 @@ function buildUserPrompt(files) {
 }
 
 // ── Parse AI response (handles both structured and raw JSON) ────────
-function parseAIResponse(response) {
+export function parseAIResponse(response) {
     if (typeof response === "object" && response.issues) {
         return response;
     }
 
-    // Strip markdown fences if present
     let text = typeof response === "string" ? response.trim() : JSON.stringify(response);
     const fenceRegex = /```(?:json)?\n?([\s\S]*?)```/;
     const match = text.match(fenceRegex);
@@ -94,44 +128,76 @@ function parseAIResponse(response) {
     }
 }
 
+function cacheIssuesForBatch(batch, allIssuesFromModel, useCache) {
+    if (!useCache || !allIssuesFromModel?.length) return;
+    for (const fileRow of batch) {
+        const norm = normalizeRel(fileRow.relativePath);
+        const issuesForFile = allIssuesFromModel.filter(
+            (i) => normalizeRel(i.file) === norm
+        );
+        const key = doctorCacheKeyForContent(fileRow.content);
+        writeDoctorCache(key, issuesForFile);
+    }
+}
+
 /**
- * Analyze a batch of files using the AI provider.
+ * Analyze files using the AI provider.
  *
  * @param {Array<{absolutePath: string, relativePath: string}>} fileList
- * @param {Function} onProgress — called with (completed, total)
- * @returns {Promise<Array>} — flat array of issues
+ * @param {(completed: number, total: number) => void} [onProgress]
+ * @param {{ useCache?: boolean, maxCharsPerBatch?: number }} [options]
  */
-export async function analyzeFiles(fileList, onProgress) {
+export async function analyzeFiles(fileList, onProgress, options = {}) {
+    const useCache = !!options.useCache;
+    const maxCharsPerBatch = options.maxCharsPerBatch ?? DEFAULT_MAX_CHARS_PER_BATCH;
+
     const provider = getProvider();
     const allIssues = [];
     let completed = 0;
+    const total = fileList.length;
 
-    // Split into batches
-    const batches = [];
-    for (let i = 0; i < fileList.length; i += BATCH_SIZE) {
-        batches.push(fileList.slice(i, i + BATCH_SIZE));
-    }
+    const bump = () => {
+        completed++;
+        if (onProgress) onProgress(completed, total);
+    };
 
-    debug(`[doctor] ${fileList.length} files → ${batches.length} batches of up to ${BATCH_SIZE}`);
+    /** @type {Array<{absolutePath: string, relativePath: string, content: string}>} */
+    const toAnalyze = [];
 
-    for (const batch of batches) {
-        // Read file contents
-        const filesWithContent = [];
-        for (const file of batch) {
-            const content = await readFileContent(file.absolutePath);
-            if (content && content.trim()) {
-                filesWithContent.push({
-                    relativePath: file.relativePath,
-                    content,
-                });
+    for (const file of fileList) {
+        const content = await readFileContent(file.absolutePath);
+        if (!content?.trim()) {
+            bump();
+            continue;
+        }
+
+        if (useCache) {
+            const key = doctorCacheKeyForContent(content);
+            const cached = readDoctorCache(key);
+            if (cached?.issues && Array.isArray(cached.issues)) {
+                allIssues.push(...cached.issues);
+                bump();
+                continue;
             }
         }
 
-        if (filesWithContent.length === 0) {
-            completed += batch.length;
-            if (onProgress) onProgress(completed, fileList.length);
-            continue;
-        }
+        toAnalyze.push({
+            absolutePath: file.absolutePath,
+            relativePath: file.relativePath,
+            content,
+        });
+    }
+
+    const batches = buildCharBatches(toAnalyze, maxCharsPerBatch);
+    debug(
+        `[doctor] ${fileList.length} files → ${toAnalyze.length} need AI → ${batches.length} batches (≤${maxCharsPerBatch} chars/file payload)`
+    );
+
+    for (const batch of batches) {
+        const filesWithContent = batch.map(({ relativePath, content }) => ({
+            relativePath,
+            content,
+        }));
 
         const messages = [
             { role: "system", content: buildSystemPrompt() },
@@ -141,7 +207,6 @@ export async function analyzeFiles(fileList, onProgress) {
         try {
             let result;
 
-            // Try structured output first (Gemini supports it)
             if (provider instanceof GeminiProvider) {
                 try {
                     result = await provider.generateStructured(
@@ -158,18 +223,20 @@ export async function analyzeFiles(fileList, onProgress) {
                 result = parseAIResponse(raw);
             }
 
-            if (result && result.issues) {
+            if (result?.issues) {
                 allIssues.push(...result.issues);
+                cacheIssuesForBatch(batch, result.issues, useCache);
             }
         } catch (err) {
             debug(`[doctor] Batch analysis error: ${err.message}`);
             console.error(
-                chalk.yellow(`\n⚠  Skipping batch (${filesWithContent.map(f => f.relativePath).join(", ")}): ${err.message}`)
+                chalk.yellow(
+                    `\n⚠  Skipping batch (${filesWithContent.map((f) => f.relativePath).join(", ")}): ${err.message}`
+                )
             );
         }
 
-        completed += batch.length;
-        if (onProgress) onProgress(completed, fileList.length);
+        for (let i = 0; i < batch.length; i++) bump();
     }
 
     return allIssues;

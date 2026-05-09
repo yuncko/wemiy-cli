@@ -21,6 +21,7 @@ import { commitCommand } from "./commands/git/commit.js";
 import { reviewCommand } from "./commands/git/review.js";
 import { prReadyCommand } from "./commands/git/pr-ready.js";
 import { agentCommand } from "./commands/agent/agent.js";
+import { login, logout, whoami } from "./commands/auth/login.js";
 
 const pkg = JSON.parse(readFileSync(path.join(__dirname, "../../package.json"), "utf-8"));
 
@@ -36,13 +37,15 @@ async function main() {
     );
     console.log(chalk.gray("  Advanced Agentic AI CLI\n"));
 
-    const program = new Command("wemiys");
+    const program = new Command("wemiy");
 
     program
         .version(pkg.version)
         .description("Wemiy AI CLI");
 
-    // Add commands
+//    program.addCommand(login);
+//  program.addCommand(logout);
+//    program.addCommand(whoami);
 
     program.addCommand(wakeUp);
     program.addCommand(fixCommand);

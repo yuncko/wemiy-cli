@@ -21,6 +21,10 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 
 app.use(express.json());
 
+app.get("/health", (_req, res) => {
+    res.json({ ok: true, service: "wemiy-auth-api" });
+});
+
 app.get("/api/me", async (req, res) => {
     const session = await auth.api.getSession({
         headers: fromNodeHeaders(req.headers),
@@ -33,6 +37,18 @@ app.get("/device", async (req, res) => {
     res.redirect(`${process.env.FRONTEND_URL || "http://localhost:3000"}/device`);
 })
 
+
+app.use((_req, res) => {
+    res.status(404).json({ error: "Not found" });
+});
+
+app.use((err, _req, res, _next) => {
+    console.error(err);
+    const status = Number(err?.status) || 500;
+    res.status(status).json({
+        error: status === 500 ? "Internal server error" : err.message || "Error",
+    });
+});
 
 app.listen(port, () => {
     console.log(`Example app listening on port ${port}`);

@@ -1,17 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
-
-// ── Supported code extensions ───────────────────────────────────────
-const SUPPORTED_EXTENSIONS = new Set([
-    ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs",
-    ".py", ".rb", ".go", ".rs", ".java", ".kt",
-    ".c", ".cpp", ".h", ".hpp", ".cs",
-    ".json", ".yaml", ".yml", ".toml",
-    ".html", ".css", ".scss", ".less",
-    ".sql", ".sh", ".bash", ".zsh",
-    ".php", ".swift", ".dart", ".lua",
-    ".vue", ".svelte",
-]);
+import { CODE_FILE_EXTENSIONS } from "../lib/code-extensions.js";
 
 // ── Directories / files to always skip ──────────────────────────────
 const IGNORED_DIRS = new Set([
@@ -73,7 +62,7 @@ export async function scanFiles(rootDir) {
                 if (IGNORED_FILES.has(entry.name)) continue;
 
                 const ext = path.extname(entry.name).toLowerCase();
-                if (!SUPPORTED_EXTENSIONS.has(ext)) continue;
+                if (!CODE_FILE_EXTENSIONS.has(ext)) continue;
 
                 // Check file size
                 try {
@@ -95,6 +84,46 @@ export async function scanFiles(rootDir) {
     }
 
     await walk(resolvedRoot);
+    return results;
+}
+
+/**
+ * Build scan entries for explicit repo-relative paths (e.g. git changed files).
+ *
+ * @param {string} rootDir
+ * @param {string[]} relativePaths — paths using "/" as separator preferred
+ * @returns {Promise<Array<{absolutePath: string, relativePath: string, extension: string, sizeBytes: number}>>}
+ */
+export async function resolveScanEntries(rootDir, relativePaths) {
+    const resolvedRoot = path.resolve(rootDir);
+    const results = [];
+
+    for (let rel of relativePaths) {
+        if (!rel || typeof rel !== "string") continue;
+        const normRel = rel.replace(/\\/g, "/").replace(/^\.\/+/, "");
+        const absolutePath = path.resolve(resolvedRoot, normRel);
+        const relToRoot = path.relative(resolvedRoot, absolutePath);
+        if (relToRoot.startsWith("..") || path.isAbsolute(relToRoot)) continue;
+
+        const ext = path.extname(normRel).toLowerCase();
+        if (!CODE_FILE_EXTENSIONS.has(ext)) continue;
+
+        try {
+            const stat = await fs.stat(absolutePath);
+            if (!stat.isFile()) continue;
+            if (stat.size > MAX_FILE_SIZE || stat.size === 0) continue;
+
+            results.push({
+                absolutePath,
+                relativePath: normRel,
+                extension: ext,
+                sizeBytes: stat.size,
+            });
+        } catch {
+            // missing or unreadable
+        }
+    }
+
     return results;
 }
 

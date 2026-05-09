@@ -14,6 +14,9 @@ import { GeminiProvider } from "../../providers/gemini-provider.js";
 import { OpenRouterProvider } from "../../providers/openrouter-provider.js";
 import { SwiftRouterProvider } from "../../providers/swiftrouter-provider.js";
 import { debug } from "../../../lib/debug.js";
+import { filterPathsToCodeFiles } from "../../lib/code-extensions.js";
+import { getRepoChangedRelativePaths } from "../../lib/git-changed-files.js";
+import { extractJson, cleanMarkdown } from "../../lib/json-ai-parse.js";
 
 const execAsync = promisify(exec);
 
@@ -30,32 +33,6 @@ function getProvider() {
     return new GeminiProvider();
 }
 
-function extractJson(text) {
-    try {
-        const match = text.match(/```json\n([\s\S]*?)\n```/);
-        if (match) return JSON.parse(match[1]);
-        
-        // try to find '{' and '}' if there are no markdown fences
-        const firstBrace = text.indexOf('{');
-        const lastBrace = text.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1) {
-            return JSON.parse(text.substring(firstBrace, lastBrace + 1));
-        }
-        
-        return JSON.parse(text);
-    } catch (e) {
-        throw new Error("Failed to parse JSON response from AI");
-    }
-}
-
-function cleanMarkdown(text) {
-    if (!text) return "";
-    let cleaned = text.trim();
-    const match = cleaned.match(/^```[\w]*\n([\s\S]*?)```$/);
-    if (match) return match[1].trim();
-    return cleaned;
-}
-
 const prReadyAction = async (options) => {
     const dryRun = !!options.dryRun;
     
@@ -66,36 +43,21 @@ const prReadyAction = async (options) => {
         )
     );
 
-    // Initial check: git repo & changes
-    let statusOutput = "";
+    let relativeChanged;
     try {
-        const { stdout } = await execAsync("git status --porcelain");
-        statusOutput = stdout;
+        relativeChanged = await getRepoChangedRelativePaths(process.cwd());
     } catch (err) {
-        console.error(chalk.red(`\n❌ Failed to run git command. Are you in a git repository?\n`));
+        console.error(chalk.red(`\n❌ ${err.message}\n`));
         process.exit(1);
     }
 
-    if (!statusOutput.trim()) {
-        console.log(chalk.green("\n✨ Nothing to prepare, working tree is clean.\n"));
+    const codePaths = filterPathsToCodeFiles(relativeChanged);
+    const changedFiles = codePaths.map((rel) => path.join(process.cwd(), rel));
+
+    if (changedFiles.length === 0) {
+        console.log(chalk.green("\n✨ Nothing to prepare — no changed code files vs HEAD.\n"));
         process.exit(0);
     }
-
-    // Only source files, excluding ignored, using naive regex
-    const changedFiles = statusOutput
-        .split('\n')
-        .filter(line => line.trim() && !line.startsWith(' D')) // Ignore purely deleted files
-        .map(line => {
-            // " M path/to/file" -> "path/to/file"
-            // "?? path/to/file" -> "path/to/file"
-            let file = line.substring(3).trim();
-            // Handle renames "R  old -> new"
-            if (file.includes(" -> ")) {
-                file = file.split(" -> ")[1].trim();
-            }
-            return file;
-        })
-        .filter(file => file.match(/\.(js|ts|jsx|tsx|py|go|rs|java)$/i));
 
     let provider;
     try {

@@ -1,294 +1,99 @@
-"# Wemiy-CLI""# Wemiy-cli-new" 
- HEAD
-# Wemiy CLI <img width="1280" height="761" alt="6015065504818597134_121" src="https://github.com/user-attachments/assets/b90038ef-87e4-414a-b167-a161109dcdfe" />
+# Wemiy CLI
 
+AI-assisted CLI for fixes, project health checks, commits, reviews, and PR prep. Published as [`@louedev/wemiy`](https://www.npmjs.com/package/@louedev/wemiy) (binary: **`wemiy`**).
 
-Wemiy CLI is a powerful command-line interface that enhances your development workflow with AI-powered features. From bug fixes to code reviews and commit generation, Wemiy helps you write better code faster.
+![Banner](https://github.com/user-attachments/assets/b90038ef-87e4-414a-b167-a161109dcdfe)
 
 ## Features
 
-- **🐛 Fix Bugs**: Use AI to identify and fix issues in your code.
-- **🩺 Doctor**: Analyze your project for bugs, performance issues, security risks, and bad practices.
-- **📝 Conventional Commits**: Automatically generate commit messages that follow the Conventional Commits specification.
-- **🔍 Code Review**: Get AI-powered code reviews for your changes.
-- **🚀 PR Ready**: Automate your entire pre-PR workflow with a single command.
-- **🧠 Model Selection**: Easily switch between different AI models.
-- **⏰ Wake Up**: Start your day with an AI assistant.
+- **Fix** — AI-assisted fixes for a file
+- **Doctor** — Scan the project for bugs, performance, security, and bad practices (`--changed-only`, `--max-files`, optional cache)
+- **Commit** — Conventional commit messages from your diff
+- **Review** — AI code review for current changes
+- **PR Ready** — Review/fix changed files, tests, commit message, PR description
+- **Agent** — Agentic workflows
+- **Model** — Switch provider (Gemini, OpenRouter, SwiftRouter)
+- **Wake Up** — Daily assistant prompt
+- **Login / Logout / Whoami** — Better Auth device flow (optional; requires the auth server)
 
----
+## Repository layout
 
-### 🚀 PR Ready — Ship in One Command
+| Path | Role |
+|------|------|
+| [`server/`](server/) | CLI package (`wemiy`), Express API + Prisma + Better Auth |
+| [`client/`](client/) | Next.js app for auth/device flow |
+| `react-tailwind-todo-app/` | Sample app (not required for the CLI) |
+| `ecommerce-site/` | Static demo site (optional) |
 
-Automate your entire pre-PR workflow with a single command:
-
-__        __             _          ____ _     ___
-\ \      / /__ _ __ ___ (_)_   _   / ___| |   |_ _|
- \ \ /\ / / _ \ '_ ` _ \| | | | | | |   | |    | |
-  \ V  V /  __/ | | | | | | |_| | | |___| |___ | |
-   \_/\_/ \___|_| |_| |_|_|\__, |  \____|_____|___|
-                           |___/
-Advanced Agentic AI CLI
-```
-
-# Wemiy CLI 🚀
-
-### Your AI Agent Inside the Terminal
-
-<p align="center">
-  <img src="https://img.shields.io/badge/AI-Agent-blue?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/CLI-Tool-black?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/OpenRouter-AI-purple?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" />
-</p>
-
----
-
-## ✨ Overview
-
-**Wemiy CLI** is an intelligent AI-powered command-line tool that transforms your terminal into a **smart development assistant**.
-
-Instead of writing commands manually, you now have an **AI agent that understands your code and acts on it**.
-
-> Fix bugs, review code, generate commits, and ship faster — all from your terminal.
-
----
-
-## 🔥 Why Wemiy?
-
-* ⚡ Works directly in your terminal
-* 🧠 Context-aware AI (understands your project)
-* 🛠 Automates repetitive dev tasks
-* 🚀 Speeds up your workflow dramatically
-
----
-
-## ✨ Features
-
-### 🤖 AI Code Fixing
- 7faba7c ( The problems have been fixed)
-
-```bash
-wemiy pr-ready
-```
-
- HEAD
-What it does automatically:
-
-1. 🔍 Reviews your code and fixes trivial issues
-2. 🧪 Generates missing test files
-3. 📝 Creates a conventional commit message
-4. 📋 Writes a full PR description + copies it to clipboard
-5. 🏁 Shows a summary of everything that happened
-
-Dry run (preview without changing anything):
-
-Automatically detects and fixes issues in your code.
-
----
-
-### 🩺 Project Doctor
- 7faba7c ( The problems have been fixed)
-
-```bash
-wemiy pr-ready --dry-run
-```
-
-Analyzes your entire project and detects:
-
-* Bugs
-* Performance issues
-* Security risks
-* Bad practices
-
----
-
- HEAD
 ## Installation
 
-### 🧾 Smart Commits
-7faba7c ( The problems have been fixed)
+From npm:
 
 ```bash
-# Install globally
-globalpm install Wemiy-cli
-
-# Or install locally
-pm install Wemiy-cli
+npm install -g @louedev/wemiy
 ```
 
- HEAD
-## Roadmap
-
-- [x] Auto-refactor commands ✅
-
-Generates clean **Conventional Commits** automatically.
-
----
-
-### 🔍 AI Code Review
+From this repo:
 
 ```bash
-wemiys review
-```
-
-Get instant feedback on your changes before pushing.
-
----
-
-### ⚙️ Model Selection
-
-```bash
-wemiys model
-```
-
-Switch between different AI models easily.
-
----
-
-### 🚀 PR Ready — Ship in One Command
-
-```bash
-wemiy pr-ready
-```
-
-Automates your entire pre-PR workflow:
-
-1. 🔍 Reviews and fixes trivial issues
-2. 🧪 Generates missing tests
-3. 📝 Creates commit message
-4. 📋 Generates PR description
-5. 🏁 Shows final summary
-
-Dry run:
-
-```bash
-wemiy pr-ready --dry-run
-```
-
----
-
-## 🚀 Installation
-
-```bash
-git clone https://github.com/yuncko/Wemiy-cli-new.git
-cd Wemiy-cli-new
+git clone https://github.com/yuncko/wemiy-cli.git
+cd wemiy-cli/server
 npm install
 npm link
 ```
 
----
+## Environment variables
 
-## ⚙️ Setup
+| Variable | Purpose |
+|----------|---------|
+| `OPENROUTER_API_KEY` | OpenRouter provider |
+| `GEMINI_API_KEY` / Google env | Gemini (see provider docs) |
+| `BACKEND_URL` | Auth server URL for `wemiy login` (default `http://localhost:3005`) |
+| `FRONTEND_URL` | Web app origin for CORS/device flow |
+| `ORBITAL_DEBUG` or `WEMIY_DEBUG` | Set to `true` for debug logs |
 
-Create a `.env` file:
+**Secrets:** Prefer environment variables for API keys. If you store keys in `~/.wemiy/config.json`, treat that file like a credential — restrict permissions and never commit it.
 
-```env
-OPENROUTER_API_KEY=your_api_key_here
-```
+Create `server/.env` for local API development (see `server` README patterns).
 
----
-
-## 🧪 Example
-
-### Fix Code
-
-```bash
-wemiys fix app.js
-```
-
-**Before**
-
-```js
-function test(){console.log("hi")}
-```
-
-**After**
-
-```js
-function test() {
-  console.log("hi");
-}
-```
-
----
-
-### Generate Commit
+## Commands
 
 ```bash
-wemiys commit
+wemiy doctor [--path <dir>] [--fix] [--json] [--changed-only] [--max-files <n>] [--use-cache]
+wemiy fix <file>
+wemiy commit
+wemiy review
+wemiy pr-ready [--dry-run]
+wemiy model
+wemiy agent
+wemiy wake-up
+wemiy login [--server-url <url>]
+wemiy logout
+wemiy whoami
 ```
 
-Output:
+Examples:
 
+```bash
+wemiy doctor --path .
+wemiy doctor --changed-only --max-files 20
+wemiy pr-ready --dry-run
+wemiy fix src/app.js
 ```
-feat: improve authentication logic and fix edge cases
+
+## Tech stack
+
+- Node.js (ESM), Commander, AI SDK / providers
+- Express 5 + Better Auth + Prisma (auth API in `server/`)
+
+## Contributing
+
+Issues and PRs are welcome. Run tests from `server/`:
+
+```bash
+cd server && npm test
 ```
 
----
+## License
 
-## 🧠 How It Works
-
-Wemiy CLI combines:
-
-* AI models via OpenRouter
-* Structured prompts
-* Context-aware analysis
-
-It doesn’t just run commands — it **thinks like a developer**.
-
----
-
-## 🧩 Use Cases
-
-* Fix bugs instantly
-* Improve code quality
-* Generate commits automatically
-* Review code before pushing
-* Analyze project health
-
----
-
-## 🛠 Tech Stack
-
-* Node.js
-* JavaScript
-* OpenRouter API
-* CLI Architecture
-
----
-
-## 🚀 Vision
-
-Turn the terminal into a fully **AI-powered development environment**.
-
----
-
-## 🗺 Roadmap
-
-* [ ] Multi-file understanding
-* [ ] Auto-refactor engine
-* [ ] GitHub integration
-* [ ] Interactive AI mode
-* [ ] Custom prompts
-
----
-
-## 🤝 Contributing
-
-Contributions, ideas, and feedback are welcome!
-
----
-
-## ⭐ Support
-
-If you like this project:
-
-👉 Give it a star
-👉 Share it with devs
-
----
-
-<p align="center">
-  Built with ❤️ by developers, for developers
-</p>
- 7faba7c ( The problems have been fixed)
+MIT

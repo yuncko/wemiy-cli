@@ -11,7 +11,6 @@ import path from "path";
 import yoctoSpinner from "yocto-spinner";
 import * as z from "zod/v4";
 import dotenv from "dotenv";
-import prisma from "../../../lib/db.js";
 
 dotenv.config();
 
@@ -383,6 +382,7 @@ export async function whoamiAction(opts) {
         process.exit(1);
     }
 
+    const { default: prisma } = await import("../../../lib/db.js");
     const user = await prisma.user.findFirst({
         where: {
             sessions: {
@@ -399,7 +399,15 @@ export async function whoamiAction(opts) {
         },
     });
 
-    // Output user session info
+    if (!user) {
+        console.log(
+            chalk.yellow(
+                "No matching user for this token in the database. Try logging in again or check BACKEND_URL."
+            )
+        );
+        process.exit(1);
+    }
+
     console.log(
         chalk.bold.greenBright(`\n👤 User: ${user.name}
 📧 Email: ${user.email}

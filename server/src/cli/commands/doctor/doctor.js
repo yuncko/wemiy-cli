@@ -4,10 +4,12 @@ import boxen from "boxen";
 import path from "path";
 import { existsSync } from "fs";
 import yoctoSpinner from "yocto-spinner";
-import { scanFiles } from "../../utils/file-scanner.js";
+import { scanFiles, resolveScanEntries } from "../../utils/file-scanner.js";
 import { analyzeFiles } from "../../services/analyzer.js";
 import { renderCLIReport, renderJSONReport } from "../../services/report-formatter.js";
 import { debug } from "../../../lib/debug.js";
+import { filterPathsToCodeFiles } from "../../lib/code-extensions.js";
+import { getRepoChangedRelativePaths } from "../../lib/git-changed-files.js";
 
 /**
  * Main doctor action
@@ -16,6 +18,16 @@ const doctorAction = async (options) => {
     const targetPath = path.resolve(options.path || process.cwd());
     const isJSON = !!options.json;
     const shouldFix = !!options.fix;
+    const changedOnly = !!options.changedOnly;
+    const useCache = !!options.useCache;
+    const maxFilesRaw = options.maxFiles != null ? String(options.maxFiles) : "";
+    const maxFiles =
+        maxFilesRaw === ""
+            ? null
+            : (() => {
+                  const n = parseInt(maxFilesRaw, 10);
+                  return Number.isFinite(n) && n > 0 ? n : null;
+              })();
 
     // ── Validate path ───────────────────────────────────────────────
     if (!existsSync(targetPath)) {
@@ -39,12 +51,23 @@ const doctorAction = async (options) => {
 
     // ── Phase 1: Scan files ─────────────────────────────────────────
     const scanSpinner = !isJSON
-        ? yoctoSpinner({ text: "Scanning project files..." }).start()
+        ? yoctoSpinner({
+              text: changedOnly ? "Resolving changed files (git)..." : "Scanning project files...",
+          }).start()
         : null;
 
     let files;
     try {
-        files = await scanFiles(targetPath);
+        if (changedOnly) {
+            const rel = await getRepoChangedRelativePaths(targetPath);
+            const codeRel = filterPathsToCodeFiles(rel);
+            files = await resolveScanEntries(targetPath, codeRel);
+        } else {
+            files = await scanFiles(targetPath);
+        }
+        if (maxFiles != null && files.length > maxFiles) {
+            files = files.slice(0, maxFiles);
+        }
     } catch (err) {
         if (scanSpinner) scanSpinner.stop();
         console.error(chalk.red(`\n❌ Failed to scan directory: ${err.message}\n`));
@@ -77,11 +100,15 @@ const doctorAction = async (options) => {
 
     let issues;
     try {
-        issues = await analyzeFiles(files, (completed, total) => {
-            if (analysisSpinner) {
-                analysisSpinner.text = `Analyzing files with AI (${completed}/${total})...`;
-            }
-        });
+        issues = await analyzeFiles(
+            files,
+            (completed, total) => {
+                if (analysisSpinner) {
+                    analysisSpinner.text = `Analyzing files with AI (${completed}/${total})...`;
+                }
+            },
+            { useCache }
+        );
     } catch (err) {
         if (analysisSpinner) analysisSpinner.stop();
         console.error(chalk.red(`\n❌ Analysis failed: ${err.message}\n`));
@@ -154,4 +181,7 @@ export const doctorCommand = new Command("doctor")
     .option("--fix", "Auto-fix detected issues using wemiy fix")
     .option("--json", "Output results as JSON")
     .option("--path <dir>", "Custom directory to scan (defaults to current directory)")
+    .option("--changed-only", "Only analyze files changed vs HEAD (git)")
+    .option("--max-files <n>", "Maximum number of files to analyze")
+    .option("--use-cache", "Reuse cached issues per file content (~/.wemiy/cache/doctor)")
     .action(doctorAction);

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WemiShop — Cart</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="navbar">
+        <a class="brand" href="index.html">
+          <span class="brand-badge" aria-hidden="true"></span>
+          <span>WemiShop</span>
+        </a>
+
+        <nav class="nav-links" aria-label="Primary">
+          <a href="index.html">Home</a>
+          <a href="shop.html">Shop</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+
+        <div class="nav-actions">
+          <form class="search" action="shop.html" method="get" role="search" aria-label="Search products">
+            <span aria-hidden="true">🔎</span>
+            <input name="q" type="search" placeholder="Search products…" />
+          </form>
+          <a class="icon-btn" href="cart.html" aria-current="page" aria-label="Open cart">
+            <span aria-hidden="true">🛒</span>
+            <span>Cart</span>
+            <span class="badge" aria-label="Items in cart">2</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="container">
+      <section class="surface cart" aria-label="Shopping cart">
+        <div>
+          <div class="section-header" style="margin:0 0 12px">
+            <div>
+              <h2>Your cart</h2>
+              <p>Static cart layout.</p>
+            </div>
+            <a class="btn" href="shop.html">Continue shopping</a>
+          </div>
+
+          <div class="table" role="table" aria-label="Cart items">
+            <div class="table-row head" role="row">
+              <div role="columnheader">Item</div>
+              <div role="columnheader">Qty</div>
+              <div role="columnheader">Price</div>
+              <div role="columnheader" aria-label="Remove"></div>
+            </div>
+
+            <div class="table-row" role="row">
+              <div class="cart-item" role="cell">
+                <div class="thumb-mini" aria-hidden="true"></div>
+                <div>
+                  <div style="font-weight:750">Aero Wireless Headphones</div>
+                  <div style="color:var(--muted); font-size:13px">Color: Midnight</div>
+                </div>
+              </div>
+              <div role="cell">
+                <input class="input" type="number" min="1" value="1" aria-label="Quantity" />
+              </div>
+              <div role="cell"><strong>$79.00</strong></div>
+              <div role="cell"><button class="btn danger" type="button" aria-label="Remove item">×</button></div>
+            </div>
+
+            <div class="table-row" role="row">
+              <div class="cart-item" role="cell">
+                <div class="thumb-mini" aria-hidden="true"></div>
+                <div>
+                  <div style="font-weight:750">Orbit Laptop Stand</div>
+                  <div style="color:var(--muted); font-size:13px">Finish: Silver</div>
+                </div>
+              </div>
+              <div role="cell">
+                <input class="input" type="number" min="1" value="1" aria-label="Quantity" />
+              </div>
+              <div role="cell"><strong>$34.00</strong></div>
+              <div role="cell"><button class="btn danger" type="button" aria-label="Remove item">×</button></div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="summary" aria-label="Order summary">
+          <h3 style="margin:0">Summary</h3>
+          <div class="summary-line"><span>Subtotal</span><strong>$113.00</strong></div>
+          <div class="summary-line"><span>Shipping</span><strong>$0.00</strong></div>
+          <div class="summary-line"><span>Tax</span><strong>$9.04</strong></div>
+          <div class="summary-line" style="padding-top:10px; border-top:1px solid var(--border)"><span>Total</span><strong>$122.04</strong></div>
+
+          <a class="btn primary" href="checkout.html">Checkout</a>
+          <a class="btn" href="shop.html">Add more items</a>
+        </aside>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <h3>WemiShop</h3>
+          <p>Simple e-commerce UI starter built with pure HTML + CSS.</p>
+        </div>
+        <div>
+          <h3>Quick links</h3>
+          <div class="footer-links">
+            <a href="shop.html">Shop</a>
+            <a href="cart.html" aria-current="page">Cart</a>
+            <a href="checkout.html">Checkout</a>
+          </div>
+        </div>
+        <div>
+          <h3>Contact</h3>
+          <p>Email: hello@wemishop.test</p>
+          <p>Hours: Mon–Sat</p>
+        </div>
+      </div>
+      <p class="copyright">© <span>2026</span> WemiShop. Demo only.</p>
+    </div>
+  </footer>
+</body>
+</html>

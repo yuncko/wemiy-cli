@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WemiShop — Home</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="navbar">
+        <a class="brand" href="index.html" aria-current="page">
+          <span class="brand-badge" aria-hidden="true"></span>
+          <span>WemiShop</span>
+        </a>
+
+        <nav class="nav-links" aria-label="Primary">
+          <a href="index.html" aria-current="page">Home</a>
+          <a href="shop.html">Shop</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+
+        <div class="nav-actions">
+          <form class="search" action="shop.html" method="get" role="search" aria-label="Search products">
+            <span aria-hidden="true">🔎</span>
+            <input name="q" type="search" placeholder="Search products…" />
+          </form>
+          <a class="icon-btn" href="cart.html" aria-label="Open cart">
+            <span aria-hidden="true">🛒</span>
+            <span>Cart</span>
+            <span class="badge" aria-label="Items in cart">2</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <div class="container">
+      <section class="hero surface" aria-label="Hero">
+        <div>
+          <h1>Modern essentials for work, play, and everything in-between.</h1>
+          <p>Browse curated tech accessories, home gear, and lifestyle items. Clean design, fair prices, fast shipping (demo layout — HTML + CSS only).</p>
+          <div class="hero-actions">
+            <a class="btn primary" href="shop.html">Shop now</a>
+            <a class="btn ghost" href="product.html">View a product</a>
+          </div>
+        </div>
+
+        <aside class="hero-card" aria-label="Store highlights">
+          <div class="kpi">
+            <div class="kpi-item"><span>Free shipping</span><strong>Orders $50+</strong></div>
+            <div class="kpi-item"><span>Returns</span><strong>30 days</strong></div>
+            <div class="kpi-item"><span>Support</span><strong>24/7 chat</strong></div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section" aria-label="Featured categories">
+        <div class="section-header">
+          <div>
+            <h2>Featured categories</h2>
+            <p>Start with popular collections.</p>
+          </div>
+          <a class="btn" href="shop.html">Browse all</a>
+        </div>
+
+        <div class="grid cols-3">
+          <a class="category" href="shop.html">
+            <p class="title">Tech Accessories</p>
+            <p class="meta">Cables, stands, audio</p>
+          </a>
+          <a class="category" href="shop.html">
+            <p class="title">Home Office</p>
+            <p class="meta">Ergonomic + minimal</p>
+          </a>
+          <a class="category" href="shop.html">
+            <p class="title">Travel</p>
+            <p class="meta">Bags, bottles, organizers</p>
+          </a>
+        </div>
+      </section>
+
+      <section class="section" aria-label="Best sellers">
+        <div class="section-header">
+          <div>
+            <h2>Best sellers</h2>
+            <p>Top picks customers love.</p>
+          </div>
+          <a class="btn" href="shop.html">See more</a>
+        </div>
+
+        <div class="grid cols-4">
+          <!-- Product card 1 -->
+          <a class="product-card" href="product.html" aria-label="Open product: Aero Wireless Headphones">
+            <div class="product-media" aria-hidden="true">
+              <svg width="90" height="90" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 12a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M6 12v6a2 2 0 0 0 2 2h1v-8H8a2 2 0 0 0-2 2Z" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M18 12v6a2 2 0 0 1-2 2h-1v-8h1a2 2 0 0 1 2 2Z" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+            </div>
+            <div class="product-body">
+              <p class="product-title">Aero Wireless Headphones</p>
+              <p class="product-desc">Comfort fit • 30h battery • Noise reduction</p>
+              <div class="pills"><span class="pill">Audio</span><span class="pill">New</span></div>
+              <div class="price-row">
+                <span class="price">$79.00</span>
+                <span class="btn">View</span>
+              </div>
+            </div>
+          </a>
+
+          <!-- Product card 2 -->
+          <a class="product-card" href="product.html" aria-label="Open product: Orbit Laptop Stand">
+            <div class="product-media" aria-hidden="true">
+              <svg width="90" height="90" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6h16l-1.2 9H5.2L4 6Z" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M8 18h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="product-body">
+              <p class="product-title">Orbit Laptop Stand</p>
+              <p class="product-desc">Aluminum • Adjustable • Desk friendly</p>
+              <div class="pills"><span class="pill">Office</span><span class="pill">Popular</span></div>
+              <div class="price-row">
+                <span class="price">$34.00</span>
+                <span class="btn">View</span>
+              </div>
+            </div>
+          </a>
+
+          <!-- Product card 3 -->
+          <a class="product-card" href="product.html" aria-label="Open product: Nova Smart Bottle">
+            <div class="product-media" aria-hidden="true">
+              <svg width="90" height="90" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M10 3h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M9 3h6v3a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2V3Z" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M8 10a4 4 0 0 1 8 0v8a4 4 0 0 1-8 0v-8Z" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+            </div>
+            <div class="product-body">
+              <p class="product-title">Nova Smart Bottle</p>
+              <p class="product-desc">Insulated • Reminders • Leak-proof</p>
+              <div class="pills"><span class="pill">Travel</span><span class="pill">Eco</span></div>
+              <div class="price-row">
+                <span class="price">$22.00</span>
+                <span class="btn">View</span>
+              </div>
+            </div>
+          </a>
+
+          <!-- Product card 4 -->
+          <a class="product-card" href="product.html" aria-label="Open product: Pixel Desk Lamp">
+            <div class="product-media" aria-hidden="true">
+              <svg width="90" height="90" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 3v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M7 8h10l-3 6H10L7 8Z" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M8 21h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M12 14v7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="product-body">
+              <p class="product-title">Pixel Desk Lamp</p>
+              <p class="product-desc">Warm + cool modes • Touch control</p>
+              <div class="pills"><span class="pill">Home</span><span class="pill">Sale</span></div>
+              <div class="price-row">
+                <span class="price">$18.00</span>
+                <span class="btn">View</span>
+              </div>
+            </div>
+          </a>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <h3>WemiShop</h3>
+          <p>Simple e-commerce UI starter built with pure HTML + CSS.</p>
+        </div>
+        <div>
+          <h3>Quick links</h3>
+          <div class="footer-links">
+            <a href="shop.html">Shop</a>
+            <a href="cart.html">Cart</a>
+            <a href="checkout.html">Checkout</a>
+          </div>
+        </div>
+        <div>
+          <h3>Contact</h3>
+          <p>Email: hello@wemishop.test</p>
+          <p>Hours: Mon–Sat</p>
+        </div>
+      </div>
+      <p class="copyright">© <span>2026</span> WemiShop. Demo only.</p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,6 +1,7 @@
 import chalk from "chalk";
 
-const isDebug = process.env.ORBITAL_DEBUG === "true";
+const isDebug =
+    process.env.ORBITAL_DEBUG === "true" || process.env.WEMIY_DEBUG === "true";
 
 /**
  * Debug logger — only prints when ORBITAL_DEBUG=true

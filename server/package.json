@@ -1,6 +1,6 @@
 {
   "name": "@louedev/wemiy",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "main": "src/index.js",
   "bin": {
     "wemiy": "src/cli/main.js"
@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/suite.test.js"
   },
   "files": [
     "src",
