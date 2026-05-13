@@ -67,7 +67,7 @@ Rules:
 Tool argument format (always pass explicit arguments, never {}):
 - list_dir: {"path":"."}
 - execute_command: {"command":"dir"}
-- read_files: {"filePaths":["src/index.js"]}
+- read_files: {"filePaths":["src/index.js"],"startLine":1,"endLine":200}
 - grep_search: {"pattern":"sendMessage(", "path":"src"}
 - replace_content: {"filePath":"src/file.js","targetContent":"old","replacementContent":"new"}`;
 
@@ -80,7 +80,7 @@ run commands. You only have read-only tools.
 
 Available tools (read-only):
 - list_dir: explore the directory tree
-- read_files: read one or more files in full
+- read_files: read files; optional startLine/endLine (1-based, inclusive) applies to each file in the batch
 - grep_search: search for symbols, patterns, or text across files
 
 How to behave:
@@ -94,7 +94,7 @@ How to behave:
 
 Tool argument format (always pass explicit arguments, never {}):
 - list_dir: {"path":"."}
-- read_files: {"filePaths":["src/index.js"]}
+- read_files: {"filePaths":["src/index.js"],"startLine":1,"endLine":200}
 - grep_search: {"pattern":"sendMessage(", "path":"src"}`;
 
 /**
@@ -209,6 +209,7 @@ export async function runAgentLoop({
     let iteration = 0;
     let finalResponse = '';
     let hitLimit = false;
+    const stagnationState = { lastFingerprint: null, streak: 0 };
 
     while (iteration < maxIterations) {
         iteration++;
@@ -292,6 +293,25 @@ export async function runAgentLoop({
                 toolName,
                 content: resultStr,
             });
+        }
+
+        const fingerprint = toolCalls
+            .map((tc) => `${tc.name || tc.toolName}::${JSON.stringify(tc.input || tc.args || {})}`)
+            .sort()
+            .join('|');
+        if (fingerprint === stagnationState.lastFingerprint) {
+            stagnationState.streak += 1;
+        } else {
+            stagnationState.lastFingerprint = fingerprint;
+            stagnationState.streak = 1;
+        }
+        if (stagnationState.streak >= 3) {
+            messages.push({
+                role: 'user',
+                content: 'System notice: The same tool calls repeated several times without clear progress. Change approach (different paths, patterns, or files), or stop and summarize the blocker.',
+            });
+            stagnationState.streak = 0;
+            stagnationState.lastFingerprint = null;
         }
     }
 

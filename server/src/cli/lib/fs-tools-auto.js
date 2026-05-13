@@ -6,22 +6,22 @@ import { confirm } from '@clack/prompts';
 import { generateDiffPreview } from './diff-preview.js';
 import { undoManager } from './undo-manager.js';
 import chalk from 'chalk';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
+import { resolveInWorkspace, redactSecrets } from './agent-path-utils.js';
+import { loadGitIgnoreMatcher } from './agent-gitignore.js';
 
 const execAsync = promisify(exec);
 
-function getBaseDir(baseDir) {
-    return (typeof baseDir === 'string' && baseDir.trim().length > 0) ? baseDir : process.cwd();
-}
+const WORKSPACE = () => process.cwd();
 
-function safeResolve(baseDir, ...parts) {
-    const base = getBaseDir(baseDir);
-    const filtered = parts.filter(p => typeof p === 'string' && p.length > 0);
+function safeResolve(_baseDir, ...parts) {
+    const filtered = parts.filter((p) => typeof p === 'string' && p.length > 0);
     if (filtered.length === 0) {
         throw new Error('Path is required.');
     }
-    return path.resolve(base, ...filtered);
+    const joined = path.join(...filtered);
+    return resolveInWorkspace(joined, WORKSPACE());
 }
 
 function isWindows() {
@@ -125,14 +125,18 @@ async function shouldProceed(message, autoApprove) {
 
 function makeReadFileTool() {
     return tool({
-        description: 'Read contents of one or multiple local files.',
+        description: 'Read contents of one or multiple local files. Optional startLine/endLine (1-based inclusive) applies to every file in this call.',
         inputSchema: z.object({
             filePaths: z.array(z.string()).optional().describe('List of absolute or relative file paths to read. Example: ["src/index.js", "package.json"]'),
             paths: z.array(z.string()).optional().describe('Alias of filePaths (some models send "paths").'),
             files: z.array(z.string()).optional().describe('Alias of filePaths (some models send "files").'),
+            startLine: z.number().int().positive().optional().describe('First line to include (1-based). Omit to read from start.'),
+            endLine: z.number().int().positive().optional().describe('Last line to include (1-based). Omit to read through end.'),
         }),
         execute: async (params) => {
             const files = params?.filePaths ?? params?.paths ?? params?.files ?? [];
+            const startLine = params?.startLine;
+            const endLine = params?.endLine;
             if (!Array.isArray(files)) {
                 return 'Error: read_files expects "filePaths" (or alias "paths"/"files") to be an array of strings.';
             }
@@ -140,12 +144,25 @@ function makeReadFileTool() {
             for (const fp of files) {
                 try {
                     if (typeof fp !== 'string' || fp.trim().length === 0) {
-                        results.push(`--- Error reading (empty path) ---: file path must be a non-empty string`);
+                        results.push('--- Error reading (empty path) ---: file path must be a non-empty string');
                         continue;
                     }
                     const resolvedPath = safeResolve(undefined, fp);
                     const content = await fs.readFile(resolvedPath, 'utf8');
-                    results.push(`--- File: ${fp} ---\n${content}`);
+                    let lines = content.split('\n');
+                    let lineNote = '';
+                    if (startLine != null || endLine != null) {
+                        const s = startLine != null ? Math.max(1, startLine) - 1 : 0;
+                        const e = endLine != null ? Math.min(lines.length, endLine) : lines.length;
+                        if (s >= lines.length) {
+                            results.push(`--- File: ${fp} ---\n(startLine past EOF; file has ${lines.length} lines)`);
+                            continue;
+                        }
+                        lines = lines.slice(s, e);
+                        lineNote = ` (lines ${s + 1}-${s + lines.length} of file)`;
+                    }
+                    const body = lines.join('\n');
+                    results.push(`--- File: ${fp}${lineNote} ---\n${redactSecrets(body)}`);
                 } catch (err) {
                     results.push(`--- Error reading ${fp} ---: ${err.message}`);
                 }
@@ -312,21 +329,23 @@ function makeExecuteCommandTool(autoApprove) {
 
                 changeTracker.trackCommand(translated, true);
                 console.log(chalk.green('\n✅ Command completed\n'));
-                return result;
+                return redactSecrets(result);
             } catch (error) {
                 changeTracker.trackCommand(typeof command === 'string' ? command : String(command), false);
                 console.error(chalk.red(`\n❌ Command failed: ${error.message}\n`));
                 if (error.stdout) console.log(error.stdout);
                 if (error.stderr) console.error(chalk.yellow(error.stderr));
 
-                return `Command failed with error: ${error.message}\nStdout: ${error.stdout || ''}\nStderr: ${error.stderr || ''}`;
+                return redactSecrets(
+                    `Command failed with error: ${error.message}\nStdout: ${error.stdout || ''}\nStderr: ${error.stderr || ''}`
+                );
             }
         },
     });
 }
 
 function makeListDirTool() {
-    async function buildTree(dir, prefix = '', depth = 0, maxDepth = 3) {
+    async function buildTree(dir, prefix = '', depth = 0, maxDepth = 3, ignoreEntry = null) {
         if (depth >= maxDepth) return '';
 
         let entries;
@@ -336,10 +355,15 @@ function makeListDirTool() {
             return `${prefix}[permission denied]\n`;
         }
 
-        entries = entries.filter(entry => {
+        entries = entries.filter((entry) => {
             if (IGNORE_DIRS.has(entry.name) && entry.isDirectory()) return false;
             if (IGNORE_FILES.has(entry.name)) return false;
             if (IGNORE_EXTENSIONS.has(path.extname(entry.name))) return false;
+            if (ignoreEntry) {
+                const rel = path.relative(WORKSPACE(), path.join(dir, entry.name));
+                const relPosix = rel.split(path.sep).join('/');
+                if (ignoreEntry(entry.name, relPosix, entry.isDirectory())) return false;
+            }
             return true;
         });
 
@@ -358,7 +382,7 @@ function makeListDirTool() {
 
             if (entry.isDirectory()) {
                 tree += `${prefix}${connector}${entry.name}/\n`;
-                tree += await buildTree(path.join(dir, entry.name), prefix + childPrefix, depth + 1, maxDepth);
+                tree += await buildTree(path.join(dir, entry.name), prefix + childPrefix, depth + 1, maxDepth, ignoreEntry);
             } else {
                 tree += `${prefix}${connector}${entry.name}\n`;
             }
@@ -368,7 +392,7 @@ function makeListDirTool() {
     }
 
     return tool({
-        description: 'List the files and directories in a given path as an ASCII tree (max depth 3).',
+        description: 'List the files and directories in a given path as an ASCII tree (max depth 3). Honors .gitignore basename rules at repo root.',
         inputSchema: z.object({
             path: z.string().optional().describe('Directory path to list. Example: "." or "src".'),
             dirPath: z.string().optional().default('.').describe('Alias of path. Directory path to list. Defaults to cwd.'),
@@ -378,23 +402,25 @@ function makeListDirTool() {
                 const requestedPath = params?.path ?? params?.dirPath ?? '.';
                 const dirPath = (typeof requestedPath === 'string' && requestedPath.trim().length > 0) ? requestedPath : '.';
                 const resolvedDir = safeResolve(undefined, dirPath);
+                const ignoreEntry = await loadGitIgnoreMatcher(WORKSPACE());
                 const rootName = path.basename(resolvedDir);
-                const tree = await buildTree(resolvedDir);
+                const tree = await buildTree(resolvedDir, '', 0, 3, ignoreEntry);
                 const result = `${rootName}/\n${tree}`;
 
                 console.log(chalk.cyan(`\n📂 Directory: ${resolvedDir}\n`));
                 console.log(result);
 
-                return result || `Directory "${dirPath}" is empty.`;
+                return redactSecrets(result || `Directory "${dirPath}" is empty.`);
             } catch (error) {
-                return `Error listing directory "${dirPath}": ${error.message}`;
+                const p = params?.path ?? params?.dirPath ?? '.';
+                return `Error listing directory "${p}": ${error.message}`;
             }
         },
     });
 }
 
 function makeGrepSearchTool() {
-    async function searchFiles(dir, pattern, extensions, results, maxResults = 50) {
+    async function searchFiles(dir, pattern, extensions, results, maxResults, ignoreEntry) {
         if (results.length >= maxResults) return;
 
         let entries;
@@ -411,8 +437,18 @@ function makeGrepSearchTool() {
 
             if (entry.isDirectory()) {
                 if (IGNORE_DIRS.has(entry.name)) continue;
-                await searchFiles(fullPath, pattern, extensions, results, maxResults);
+                if (ignoreEntry) {
+                    const rel = path.relative(WORKSPACE(), fullPath);
+                    const relPosix = rel.split(path.sep).join('/');
+                    if (ignoreEntry(entry.name, relPosix, true)) continue;
+                }
+                await searchFiles(fullPath, pattern, extensions, results, maxResults, ignoreEntry);
             } else {
+                if (ignoreEntry) {
+                    const rel = path.relative(WORKSPACE(), fullPath);
+                    const relPosix = rel.split(path.sep).join('/');
+                    if (ignoreEntry(entry.name, relPosix, false)) continue;
+                }
                 if (extensions.length > 0 && !extensions.includes(path.extname(entry.name))) {
                     continue;
                 }
@@ -425,7 +461,7 @@ function makeGrepSearchTool() {
                         if (results.length >= maxResults) break;
                         if (lines[i].includes(pattern)) {
                             results.push({
-                                filePath: path.relative(process.cwd(), fullPath),
+                                filePath: path.relative(process.cwd(), fullPath).split(path.sep).join('/'),
                                 lineNumber: i + 1,
                                 lineContent: lines[i].trim().substring(0, 200),
                             });
@@ -438,8 +474,67 @@ function makeGrepSearchTool() {
         }
     }
 
+    async function ripgrepJsonSearch(rootDir, pattern, fileExtensions, maxResults) {
+        return new Promise((resolve) => {
+            const extArgs = [];
+            if (fileExtensions && fileExtensions.length > 0) {
+                for (const ext of fileExtensions) {
+                    const e = ext.startsWith('.') ? ext : `.${ext}`;
+                    extArgs.push('--glob', `*${e}`);
+                }
+            }
+            const finalArgs = [
+                '--json',
+                '--max-count',
+                String(Math.min(50, maxResults)),
+                '--glob',
+                '!.git/**',
+                '--glob',
+                '!node_modules/**',
+                ...extArgs,
+                pattern,
+                '.',
+            ];
+            const proc = spawn('rg', finalArgs, { cwd: rootDir, shell: false });
+            let buf = '';
+            let settled = false;
+            const finish = (val) => {
+                if (settled) return;
+                settled = true;
+                resolve(val);
+            };
+            proc.stdout.on('data', (d) => { buf += d.toString(); });
+            proc.on('error', () => finish(null));
+            proc.on('close', () => {
+                const results = [];
+                for (const line of buf.split('\n')) {
+                    if (results.length >= maxResults) break;
+                    if (!line.trim()) continue;
+                    try {
+                        const j = JSON.parse(line);
+                        if (j.type === 'match' && j.data) {
+                            const p = j.data.path && j.data.path.text;
+                            const lineNum = j.data.line_number;
+                            const textLine = j.data.lines && j.data.lines.text;
+                            if (p && lineNum != null) {
+                                results.push({
+                                    filePath: path.relative(process.cwd(), path.join(rootDir, p)).split(path.sep).join('/'),
+                                    lineNumber: lineNum,
+                                    lineContent: (textLine || '').trim().substring(0, 200),
+                                });
+                            }
+                        }
+                    } catch {
+                        /* ignore malformed jsonl */
+                    }
+                }
+                finish(results.length ? results : null);
+            });
+        });
+    }
+
     return tool({
-        description: 'Search for a keyword or text pattern across files in the workspace.',
+        description: 'Search for a keyword or text pattern across files. Uses ripgrep (rg) when available, otherwise scans the tree.',
         inputSchema: z.object({
             pattern: z.string().describe('The text pattern to search for (case-sensitive). Example: "sendMessage("'),
             path: z.string().optional().describe('Directory to search in. Example: "." or "src".'),
@@ -449,10 +544,15 @@ function makeGrepSearchTool() {
         execute: async ({ pattern, path: searchPath, dirPath, fileExtensions }) => {
             try {
                 const requestedPath = searchPath || dirPath || '.';
-                const resolvedDir = path.resolve(process.cwd(), requestedPath);
-                const results = [];
+                const resolvedDir = safeResolve(undefined, requestedPath);
+                const maxResults = 50;
 
-                await searchFiles(resolvedDir, pattern, fileExtensions || [], results);
+                let results = await ripgrepJsonSearch(resolvedDir, pattern, fileExtensions || [], maxResults);
+                if (!results || results.length === 0) {
+                    const ignoreEntry = await loadGitIgnoreMatcher(WORKSPACE());
+                    results = [];
+                    await searchFiles(resolvedDir, pattern, fileExtensions || [], results, maxResults, ignoreEntry);
+                }
 
                 if (results.length === 0) {
                     return `No matches found for "${pattern}" in ${requestedPath}.`;
@@ -460,12 +560,12 @@ function makeGrepSearchTool() {
 
                 console.log(chalk.cyan(`\n🔍 Found ${results.length} match(es) for "${pattern}":\n`));
 
-                const formatted = results.map(r =>
+                const formatted = results.map((r) =>
                     `  ${chalk.gray(r.filePath)}:${chalk.yellow(r.lineNumber)} → ${r.lineContent}`
                 ).join('\n');
-                console.log(formatted + '\n');
+                console.log(`${formatted}\n`);
 
-                return JSON.stringify(results, null, 2);
+                return redactSecrets(JSON.stringify(results, null, 2));
             } catch (error) {
                 return `Error searching for "${pattern}": ${error.message}`;
             }

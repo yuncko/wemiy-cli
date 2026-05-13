@@ -8,6 +8,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { configManager } from '../config/config-manager.js';
 import { getAgentTools, changeTracker, AGENT_TOOL_IDS } from '../lib/fs-tools-auto.js';
+import { collectProjectBrief } from '../lib/agent-project-brief.js';
 import { chatService } from '../chat/chat-base.js';
 import {
     AGENT_MODES,
@@ -25,6 +26,119 @@ const execAsync = promisify(exec);
 
 const DEFAULT_MAX_ITERATIONS = 25;
 const MAX_VERIFY_RETRIES = 3;
+const VERIFY_OUTPUT_CAP = 48000;
+
+async function fsExists(p) {
+    try {
+        await fs.access(p);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function truncateVerifyChunk(text) {
+    if (text == null || typeof text !== 'string') return '';
+    if (text.length <= VERIFY_OUTPUT_CAP) return text;
+    return '...(head truncated)\n' + text.slice(-VERIFY_OUTPUT_CAP);
+}
+
+/**
+ * @param {{ filesModified: string[], filesCreated: string[], commandsRun: { command: string, success: boolean }[] }} report
+ */
+function formatAgentResumeNote(report) {
+    const cwd = process.cwd();
+    const mods = report.filesModified.map((f) => path.relative(cwd, f)).slice(0, 30);
+    const adds = report.filesCreated.map((f) => path.relative(cwd, f)).slice(0, 20);
+    const cmds = report.commandsRun.slice(-12).map((c) => `${c.success ? 'ok' : 'fail'}:${c.command}`).join('; ');
+    return `\n\n---\n**Agent session:** files_modified=${mods.join(', ') || 'none'}; files_created=${adds.join(', ') || 'none'}; recent_commands=${cmds || 'none'}`;
+}
+
+async function detectPackageRunner(cwd = process.cwd()) {
+    const pkgPath = path.join(cwd, 'package.json');
+    if (!(await fsExists(pkgPath))) return null;
+    let pm = 'npm';
+    try {
+        const raw = await fs.readFile(pkgPath, 'utf8');
+        const pkg = JSON.parse(raw);
+        const spec = pkg.packageManager;
+        if (typeof spec === 'string') {
+            if (spec.startsWith('pnpm')) pm = 'pnpm';
+            else if (spec.startsWith('yarn')) pm = 'yarn';
+            else if (spec.startsWith('bun')) pm = 'bun';
+        }
+    } catch {
+        /* invalid package.json; keep default pm */
+    }
+    if (await fsExists(path.join(cwd, 'pnpm-lock.yaml'))) pm = 'pnpm';
+    else if (await fsExists(path.join(cwd, 'yarn.lock'))) pm = 'yarn';
+    else if (await fsExists(path.join(cwd, 'bun.lockb'))) pm = 'bun';
+    return pm;
+}
+
+function runPackageScript(pm, scriptName) {
+    if (pm === 'pnpm') return `pnpm run ${scriptName}`;
+    if (pm === 'yarn') return `yarn run ${scriptName}`;
+    if (pm === 'bun') return `bun run ${scriptName}`;
+    return `npm run ${scriptName}`;
+}
+
+/**
+ * Build verification shell commands for the current workspace.
+ * @param {string} [cwd]
+ * @returns {Promise<string[]>}
+ */
+async function collectVerifyCommands(cwd = process.cwd()) {
+    const overridePath = path.join(cwd, '.wemiy', 'agent-verify.json');
+    try {
+        const raw = await fs.readFile(overridePath, 'utf8');
+        const j = JSON.parse(raw);
+        if (Array.isArray(j.commands) && j.commands.length > 0 && j.commands.every((c) => typeof c === 'string')) {
+            return j.commands.map((c) => c.trim()).filter(Boolean);
+        }
+    } catch {
+        /* no override */
+    }
+
+    const commands = [];
+    const pm = await detectPackageRunner(cwd);
+    const pkgPath = path.join(cwd, 'package.json');
+
+    if (pm && (await fsExists(pkgPath))) {
+        try {
+            const pkgRaw = await fs.readFile(pkgPath, 'utf8');
+            const pkg = JSON.parse(pkgRaw);
+            const scripts = pkg.scripts || {};
+
+            if (scripts.lint) commands.push(runPackageScript(pm, 'lint'));
+            if (scripts.typecheck || scripts['type-check']) {
+                commands.push(runPackageScript(pm, scripts.typecheck ? 'typecheck' : 'type-check'));
+            }
+            if (scripts.build) commands.push(runPackageScript(pm, 'build'));
+            if (scripts.test && !scripts.test.includes('no test specified')) {
+                commands.push(runPackageScript(pm, 'test'));
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+
+    if (await fsExists(path.join(cwd, 'tsconfig.json')) && !commands.some((c) => c.includes('tsc'))) {
+        if (pm === 'pnpm') commands.push('pnpm exec tsc --noEmit');
+        else if (pm === 'yarn') commands.push('yarn exec tsc --noEmit');
+        else if (pm === 'bun') commands.push('bunx tsc --noEmit');
+        else commands.push('npx tsc --noEmit');
+    }
+
+    if (await fsExists(path.join(cwd, 'go.mod'))) {
+        commands.push('go test ./...');
+    }
+    if (await fsExists(path.join(cwd, 'Cargo.toml'))) {
+        commands.push('cargo check');
+    }
+
+    return commands;
+}
 
 const PLANNING_PROMPT = `You are Wemiy Agent, an expert software planning assistant.
 Given a task, create a clear, numbered step-by-step plan to accomplish it.
@@ -153,13 +267,16 @@ function displaySummary(report, verificationPassed) {
 // PHASE 1: TASK PLANNING
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function planTask(task, aiService) {
+async function planTask(task, aiService, projectBrief) {
     const spinner = yoctoSpinner({ text: 'Generating task plan...', color: 'magenta' }).start();
 
     try {
+        const userContent = projectBrief
+            ? `${projectBrief}\n\n---\nTask:\n${task}`
+            : task;
         const messages = [
             { role: 'system', content: PLANNING_PROMPT },
-            { role: 'user', content: task },
+            { role: 'user', content: userContent },
         ];
 
         const result = await aiService.sendMessage(messages, null, undefined, null);
@@ -177,50 +294,24 @@ async function planTask(task, aiService) {
 // PHASE 3: VERIFICATION
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Run configured verification commands and capture output for the model if anything fails.
+ * @returns {Promise<{ ok: boolean, modelReport: string }>}
+ */
 async function verifyChanges() {
     displayStep('Verification', '🔍', 'cyan', 'Checking project health...');
 
-    const verifyCommands = [];
-
-    try {
-        await fs.access(path.join(process.cwd(), 'package.json'));
-        try {
-            const pkgRaw = await fs.readFile(path.join(process.cwd(), 'package.json'), 'utf8');
-            const pkg = JSON.parse(pkgRaw);
-            const scripts = pkg.scripts || {};
-
-            if (scripts.lint) verifyCommands.push('npm run lint');
-            if (scripts.typecheck || scripts['type-check']) {
-                verifyCommands.push(scripts.typecheck ? 'npm run typecheck' : 'npm run type-check');
-            }
-            if (scripts.build) verifyCommands.push('npm run build');
-            if (scripts.test && !scripts.test.includes('no test specified')) {
-                verifyCommands.push('npm test');
-            }
-        } catch {
-            // ignore parse error
-        }
-    } catch {
-        // not a Node project
-    }
-
-    try {
-        await fs.access(path.join(process.cwd(), 'tsconfig.json'));
-        if (!verifyCommands.some((c) => c.includes('tsc'))) {
-            verifyCommands.push('npx tsc --noEmit');
-        }
-    } catch {
-        // no tsconfig
-    }
+    const verifyCommands = await collectVerifyCommands();
 
     if (verifyCommands.length === 0) {
         console.log(chalk.gray('  No verification commands detected — skipping verification.'));
-        return true;
+        return { ok: true, modelReport: '' };
     }
 
     console.log(chalk.gray(`  Running ${verifyCommands.length} verification command(s)...\n`));
 
     let allPassed = true;
+    const sections = [];
 
     for (const cmd of verifyCommands) {
         const spinner = yoctoSpinner({ text: `Running: ${cmd}...` }).start();
@@ -228,16 +319,23 @@ async function verifyChanges() {
         try {
             await execAsync(cmd, { cwd: process.cwd(), timeout: 120000 });
             spinner.success(chalk.green(`${cmd} ✔`));
+            sections.push(`### ${cmd}\nexit: 0\n(no output)`);
         } catch (error) {
             spinner.error(chalk.red(`${cmd} ✖`));
             allPassed = false;
 
-            if (error.stdout) console.log(chalk.gray(error.stdout.substring(0, 500)));
-            if (error.stderr) console.log(chalk.yellow(error.stderr.substring(0, 500)));
+            const out = truncateVerifyChunk(String(error.stdout || ''));
+            const err = truncateVerifyChunk(String(error.stderr || ''));
+            if (error.stdout) console.log(chalk.gray(String(error.stdout).substring(0, 500)));
+            if (error.stderr) console.log(chalk.yellow(String(error.stderr).substring(0, 500)));
+
+            sections.push(
+                `### ${cmd}\nexit: ${error.code ?? 'non-zero'}\nstdout:\n${out}\nstderr:\n${err}`
+            );
         }
     }
 
-    return allPassed;
+    return { ok: allPassed, modelReport: sections.join('\n\n') };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,6 +401,7 @@ export async function runAgent(task, options = {}) {
         ));
     }
 
+    const projectBrief = await collectProjectBrief();
     const aiService = await initAIService();
     const renderText = await getMarkedRender();
 
@@ -314,12 +413,13 @@ export async function runAgent(task, options = {}) {
             renderText,
             maxIterations,
             conversationId: options.conversationId,
+            projectBrief,
         });
     }
 
     // ── Phase 1: Planning ────────────────────────────────────────────────
     displayStep('Phase 1', '📋', 'magenta', 'Task Planning');
-    const plan = await planTask(task, aiService);
+    const plan = await planTask(task, aiService, projectBrief);
     displayPlan(task, plan);
 
     if (confirmPlan) {
@@ -348,6 +448,7 @@ export async function runAgent(task, options = {}) {
         task,
         plan,
         conversationId: options.conversationId,
+        projectBrief,
     });
 
     const { finalResponse: agentResponse } = await runAgentLoop({
@@ -358,30 +459,19 @@ export async function runAgent(task, options = {}) {
         renderText,
     });
 
-    // Persist the turn so future invocations can resume context
-    if (options.conversationId) {
-        try {
-            await chatService.addMessage(options.conversationId, 'user', task);
-            await chatService.addMessage(
-                options.conversationId,
-                'assistant',
-                agentResponse || '(Agent completed task with tool calls only)'
-            );
-        } catch (error) {
-            console.log(chalk.yellow(`\n⚠️  Could not persist agent turn: ${error.message}`));
-        }
-    }
-
     // ── Phase 3: Verification ───────────────────────────────────────────
     displayStep('Phase 3', '🔍', 'green', 'Verification');
 
     const report = changeTracker.getReport();
     let verificationPassed = true;
+    let lastVerifyReport = '';
     // Track total iterations across the verification retry loop
     let iterationBudgetLeft = Math.max(0, maxIterations - 1); // leave a small floor
 
     if (report.filesModified.length > 0 || report.filesCreated.length > 0) {
-        verificationPassed = await verifyChanges();
+        let verificationResult = await verifyChanges();
+        verificationPassed = verificationResult.ok;
+        lastVerifyReport = verificationResult.modelReport;
 
         if (!verificationPassed) {
             console.log(chalk.yellow('\n⚠️  Verification failed. The agent will attempt to fix issues...\n'));
@@ -392,9 +482,11 @@ export async function runAgent(task, options = {}) {
                 const fixBudget = Math.min(10, iterationBudgetLeft);
                 const fixMessages = await buildExecutionMessages({
                     mode: AGENT_MODES.ACT,
-                    task: 'The verification step failed. Read the errors above and fix the code so that all checks pass.',
-                    plan: 'Fix the verification errors',
+                    task: 'Fix verification failures using the logs below. Make minimal changes so all checks pass.',
+                    plan: 'Address each failing command shown in the verification output.',
                     conversationId: options.conversationId,
+                    projectBrief,
+                    verificationFailureReport: lastVerifyReport,
                 });
 
                 const { iterationsUsed } = await runAgentLoop({
@@ -406,7 +498,9 @@ export async function runAgent(task, options = {}) {
                 });
 
                 iterationBudgetLeft -= iterationsUsed;
-                verificationPassed = await verifyChanges();
+                verificationResult = await verifyChanges();
+                verificationPassed = verificationResult.ok;
+                lastVerifyReport = verificationResult.modelReport;
                 if (verificationPassed) {
                     console.log(chalk.green('\n✅ Verification passed after fix!\n'));
                     break;
@@ -435,6 +529,21 @@ export async function runAgent(task, options = {}) {
         }));
     }
 
+    if (options.conversationId) {
+        try {
+            const note = formatAgentResumeNote(finalReport)
+                + `\nverification: ${verificationPassed ? 'passed' : 'failed'}`;
+            await chatService.addMessage(options.conversationId, 'user', task);
+            await chatService.addMessage(
+                options.conversationId,
+                'assistant',
+                (agentResponse || '(Agent completed task with tool calls only)') + note
+            );
+        } catch (error) {
+            console.log(chalk.yellow(`\n⚠️  Could not persist agent turn: ${error.message}`));
+        }
+    }
+
     console.log(chalk.green.bold('\n✨ Agent task complete!\n'));
 }
 
@@ -442,7 +551,7 @@ export async function runAgent(task, options = {}) {
 // DISCUSSION MODE — read-only, conversational
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function runDiscussionMode({ task, aiService, renderText, maxIterations, conversationId }) {
+async function runDiscussionMode({ task, aiService, renderText, maxIterations, conversationId, projectBrief }) {
     const allTools = getAgentTools(false);
     const tools = {};
     for (const id of DISCUSS_TOOL_IDS) {
@@ -454,6 +563,7 @@ async function runDiscussionMode({ task, aiService, renderText, maxIterations, c
         task,
         plan: null,
         conversationId,
+        projectBrief,
     });
 
     const { finalResponse } = await runAgentLoop({
@@ -498,32 +608,94 @@ async function runDiscussionMode({ task, aiService, renderText, maxIterations, c
 
 const MAX_HYDRATED_HISTORY = 30; // turns of prior context the agent reloads
 
-async function buildExecutionMessages({ mode, task, plan, conversationId }) {
-    const extra = plan
-        ? `The user's task: ${task}\n\nYour plan:\n${plan}\n\nFollow this plan. Execute each step using the tools available to you. When done, provide a brief summary.`
-        : `The user wants to discuss this project: ${task}`;
-
-    const systemPrompt = buildAgentSystemPrompt(mode, extra);
-
-    const messages = [{ role: 'system', content: systemPrompt }];
-
+/**
+ * @param {Object} params
+ * @param {string} params.mode
+ * @param {string} params.task
+ * @param {string|null} [params.plan]
+ * @param {string|null} [params.conversationId]
+ * @param {string} [params.projectBrief]
+ * @param {string} [params.verificationFailureReport]
+ */
+async function buildExecutionMessages({
+    mode,
+    task,
+    plan,
+    conversationId,
+    projectBrief = '',
+    verificationFailureReport = '',
+}) {
+    let history = [];
     if (conversationId) {
         try {
-            const history = await chatService.getMessages(conversationId);
-            const recent = history.slice(-MAX_HYDRATED_HISTORY);
-            for (const m of recent) {
-                if (m.role === 'user' || m.role === 'assistant') {
-                    messages.push({
-                        role: m.role,
-                        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-                    });
-                }
-            }
+            history = await chatService.getMessages(conversationId);
         } catch {
-            // best-effort; missing history is not fatal
+            history = [];
         }
     }
 
-    messages.push({ role: 'user', content: task });
+    let resumeHint = '';
+    const lastAgent = [...history].reverse().find(
+        (m) => m.role === 'assistant' && String(m.content).includes('**Agent session:**')
+    );
+    if (lastAgent) {
+        const s = String(lastAgent.content);
+        const i = s.indexOf('**Agent session:**');
+        resumeHint = `## Prior agent session (from saved chat)\n${s.slice(i)}`;
+    }
+
+    const extraParts = [];
+    if (projectBrief) {
+        extraParts.push(`## Project brief (deterministic scan)\n${projectBrief}`);
+    }
+    if (resumeHint) {
+        extraParts.push(resumeHint);
+    }
+    if (plan) {
+        extraParts.push(
+            `The user's task: ${task}\n\nYour plan:\n${plan}\n\nFollow this plan. Execute each step using the tools available to you. When done, provide a brief summary.`
+        );
+    } else {
+        extraParts.push(`The user wants to discuss this project: ${task}`);
+    }
+
+    const systemPrompt = buildAgentSystemPrompt(mode, extraParts.join('\n\n'));
+
+    const messages = [{ role: 'system', content: systemPrompt }];
+
+    const recent = history.slice(-MAX_HYDRATED_HISTORY);
+    for (const m of recent) {
+        if (m.role === 'user' || m.role === 'assistant') {
+            messages.push({
+                role: m.role,
+                content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+            });
+        }
+        if (m.role === 'tool') {
+            const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            let parsed = null;
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                parsed = null;
+            }
+            if (parsed && parsed.toolCallId && parsed.toolName) {
+                const body = typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content);
+                messages.push({
+                    role: 'tool',
+                    toolCallId: parsed.toolCallId,
+                    toolName: parsed.toolName,
+                    content: body,
+                });
+            }
+        }
+    }
+
+    let userContent = task;
+    if (verificationFailureReport) {
+        userContent = `## Automated verification output\n${verificationFailureReport}\n\n## Your instruction\n${task}`;
+    }
+
+    messages.push({ role: 'user', content: userContent });
     return messages;
 }
