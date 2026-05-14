@@ -11,7 +11,10 @@ import {
     DISCUSS_TOOL_IDS,
     buildAgentSystemPrompt,
     runAgentLoop,
+    appendMessagesFromStoredHistory,
 } from "../agent/agent-runtime.js";
+import { buildPersistToolCallback } from "../agent/agent-engine.js";
+import { loadProjectMemory } from "../lib/agent-project-brief.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -81,21 +84,16 @@ async function initConversation(userId, conversationId, mode) {
 // ── Build the message array including prior history ────────────────────────
 
 async function buildMessages(conversation, userPrompt, mode) {
-    const systemPrompt = buildAgentSystemPrompt(mode);
+    const memoryMd = await loadProjectMemory();
+    const memoryBlock = memoryMd ? `## Project memory (.wemiy/memory.md)\n${memoryMd}` : "";
+    const systemPrompt = buildAgentSystemPrompt(mode, memoryBlock);
 
     const messages = [{ role: "system", content: systemPrompt }];
 
     try {
         const history = await chatService.getMessages(conversation.id);
         const recent = history.slice(-MAX_HYDRATED_HISTORY);
-        for (const m of recent) {
-            if (m.role === "user" || m.role === "assistant") {
-                messages.push({
-                    role: m.role,
-                    content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-                });
-            }
-        }
+        appendMessagesFromStoredHistory(messages, recent);
     } catch {
         // best-effort
     }
@@ -216,6 +214,7 @@ async function agentLoop(conversation, mode, autoApprove) {
                 tools,
                 maxIterations: MAX_ITERATIONS,
                 renderText,
+                onPersistToolRound: buildPersistToolCallback(conversation.id),
             });
 
             await chatService.addMessage(

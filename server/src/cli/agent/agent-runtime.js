@@ -18,6 +18,88 @@ export const DISCUSS_TOOL_IDS = Object.freeze(['read_files', 'list_dir', 'grep_s
 
 export { AGENT_TOOL_IDS };
 
+/** Stored assistant payload shape for tool rounds (persisted to chats.json). */
+export const WEMIY_AGENT_ROUND_KEY = 'wemiyAgentRound';
+
+/**
+ * Append stored chat messages to an in-memory message array in provider-ready shape.
+ * Handles plain user/assistant text, tool rows as JSON, and assistant rows that
+ * embed a full tool round ({@link WEMIY_AGENT_ROUND_KEY}).
+ *
+ * @param {Array<object>} messages - mutable array to push onto
+ * @param {Array<{ role: string, content?: unknown }>} historySlice - chronological slice
+ */
+export function appendMessagesFromStoredHistory(messages, historySlice) {
+    for (const m of historySlice) {
+        if (m.role === 'user') {
+            messages.push({
+                role: 'user',
+                content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''),
+            });
+            continue;
+        }
+
+        if (m.role === 'assistant') {
+            let c = m.content;
+            if (typeof c === 'object' && c !== null) {
+                if (c[WEMIY_AGENT_ROUND_KEY] === true && Array.isArray(c.toolCalls)) {
+                    messages.push({
+                        role: 'assistant',
+                        content: c.text || null,
+                        toolCalls: c.toolCalls,
+                    });
+                } else {
+                    messages.push({
+                        role: 'assistant',
+                        content: JSON.stringify(c),
+                    });
+                }
+                continue;
+            }
+            let parsed = null;
+            if (typeof c === 'string' && c.trim().startsWith('{')) {
+                try {
+                    parsed = JSON.parse(c);
+                } catch {
+                    parsed = null;
+                }
+            }
+            if (parsed && parsed[WEMIY_AGENT_ROUND_KEY] === true && Array.isArray(parsed.toolCalls)) {
+                messages.push({
+                    role: 'assistant',
+                    content: parsed.text || null,
+                    toolCalls: parsed.toolCalls,
+                });
+            } else {
+                messages.push({
+                    role: 'assistant',
+                    content: typeof c === 'string' ? c : JSON.stringify(c ?? ''),
+                });
+            }
+            continue;
+        }
+
+        if (m.role === 'tool') {
+            const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '');
+            let parsed = null;
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                parsed = null;
+            }
+            if (parsed && parsed.toolCallId && parsed.toolName) {
+                const body = typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content ?? '');
+                messages.push({
+                    role: 'tool',
+                    toolCallId: parsed.toolCallId,
+                    toolName: parsed.toolName,
+                    content: body,
+                });
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SYSTEM PROMPT BUILDER
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,6 +279,12 @@ export async function executeTool(toolName, toolInput) {
  * @param {Object} params.tools     - tools map (toolId → AI SDK tool instance)
  * @param {number} [params.maxIterations=25]
  * @param {Function} [params.renderText] - hook to render assistant text content
+ * @param {null|((payload: {
+ *   iteration: number,
+ *   assistantText: string,
+ *   toolCalls: Array<{ id: string, name: string, toolName: string, input: object }>,
+ *   toolResults: Array<{ callId: string, toolName: string, resultStr: string }>
+ * }) => Promise<void>)} [params.onPersistToolRound] - persist each tool round (e.g. to ChatService)
  * @returns {Promise<{ finalResponse: string, iterationsUsed: number, hitLimit: boolean }>}
  */
 export async function runAgentLoop({
@@ -205,6 +293,7 @@ export async function runAgentLoop({
     tools,
     maxIterations = 25,
     renderText = null,
+    onPersistToolRound = null,
 }) {
     let iteration = 0;
     let finalResponse = '';
@@ -266,6 +355,7 @@ export async function runAgentLoop({
             if (tr && tr.toolCallId) sdkResults.set(tr.toolCallId, tr);
         }
 
+        const toolResultsForPersist = [];
         for (const tc of toolCalls) {
             const toolName = tc.name || tc.toolName;
             const toolInput = tc.input || tc.args || {};
@@ -293,6 +383,33 @@ export async function runAgentLoop({
                 toolName,
                 content: resultStr,
             });
+
+            toolResultsForPersist.push({
+                callId,
+                toolName,
+                resultStr,
+            });
+        }
+
+        if (typeof onPersistToolRound === 'function') {
+            const persistCalls = toolCalls.map((tc) => ({
+                id: tc.id || tc.toolCallId,
+                name: tc.name || tc.toolName,
+                toolName: tc.name || tc.toolName,
+                input: tc.input ?? tc.args ?? {},
+            }));
+            try {
+                await onPersistToolRound({
+                    iteration,
+                    assistantText: textContent || '',
+                    toolCalls: persistCalls,
+                    toolResults: toolResultsForPersist,
+                });
+            } catch (e) {
+                if (process.env.WEMIY_DEBUG) {
+                    console.error('[wemiy] onPersistToolRound failed:', e);
+                }
+            }
         }
 
         const fingerprint = toolCalls

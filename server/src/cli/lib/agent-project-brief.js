@@ -75,3 +75,22 @@ export async function collectProjectBrief(cwd = process.cwd()) {
 
     return lines.join('\n');
 }
+
+const PROJECT_MEMORY_MAX_CHARS = 8000;
+
+/**
+ * Load optional repo-scoped memory for agent system prompts.
+ * @param {string} [cwd]
+ * @returns {Promise<string>} trimmed markdown or empty string if missing
+ */
+export async function loadProjectMemory(cwd = process.cwd()) {
+    const memoryPath = path.join(cwd, '.wemiy', 'memory.md');
+    try {
+        const text = await fs.readFile(memoryPath, 'utf8');
+        const trimmed = text.trim();
+        if (trimmed.length <= PROJECT_MEMORY_MAX_CHARS) return trimmed;
+        return `${trimmed.slice(0, PROJECT_MEMORY_MAX_CHARS)}\n\n...(truncated after ${PROJECT_MEMORY_MAX_CHARS} characters)`;
+    } catch {
+        return '';
+    }
+}

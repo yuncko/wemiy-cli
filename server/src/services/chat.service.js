@@ -101,6 +101,63 @@ export class ChatService {
             });
     }
 
+    /** @returns {Promise<number>} */
+    async countMessages(conversationId) {
+        await this._initStore();
+        return this.store.messages.filter((m) => m.conversationId === conversationId).length;
+    }
+
+    /**
+     * @param {string} conversationId
+     * @param {string} userId
+     * @returns {Promise<object|null>}
+     */
+    async getConversation(conversationId, userId) {
+        await this._initStore();
+        const conversation = this.store.conversations.find(
+            (c) => c.id === conversationId && c.userId === userId
+        );
+        if (!conversation) return null;
+        const messages = await this.getMessages(conversationId);
+        return { ...conversation, messages };
+    }
+
+    /**
+     * Copy a conversation and its messages (optionally up to and including a message id).
+     * @param {string} userId
+     * @param {string} sourceConversationId
+     * @param {string|null} [untilMessageId] - if set, copy messages up to and including this id (by timeline order)
+     * @returns {Promise<object|null>} new conversation or null if source missing
+     */
+    async forkConversation(userId, sourceConversationId, untilMessageId = null) {
+        await this._initStore();
+        const source = this.store.conversations.find(
+            (c) => c.id === sourceConversationId && c.userId === userId
+        );
+        if (!source) return null;
+
+        const rawMsgs = this.store.messages
+            .filter((m) => m.conversationId === sourceConversationId)
+            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+        let toCopy = rawMsgs;
+        if (untilMessageId) {
+            const idx = toCopy.findIndex((m) => m.id === untilMessageId);
+            if (idx >= 0) {
+                toCopy = toCopy.slice(0, idx + 1);
+            }
+        }
+
+        const title = `Fork: ${source.title}`.slice(0, 120);
+        const newConv = await this.createConversation(userId, source.mode, title);
+
+        for (const m of toCopy) {
+            await this.addMessage(newConv.id, m.role, m.content);
+        }
+
+        return { ...newConv, messages: await this.getMessages(newConv.id) };
+    }
+
     async deleteConversation(conversationId, userId) {
         await this._initStore();
         const initialLen = this.store.conversations.length;

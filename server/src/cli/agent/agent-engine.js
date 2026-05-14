@@ -8,7 +8,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { configManager } from '../config/config-manager.js';
 import { getAgentTools, changeTracker, AGENT_TOOL_IDS } from '../lib/fs-tools-auto.js';
-import { collectProjectBrief } from '../lib/agent-project-brief.js';
+import { collectProjectBrief, loadProjectMemory } from '../lib/agent-project-brief.js';
 import { chatService } from '../chat/chat-base.js';
 import {
     AGENT_MODES,
@@ -16,9 +16,37 @@ import {
     buildAgentSystemPrompt,
     runAgentLoop,
     displayStep,
+    appendMessagesFromStoredHistory,
+    WEMIY_AGENT_ROUND_KEY,
 } from './agent-runtime.js';
 
 const execAsync = promisify(exec);
+
+export function buildPersistToolCallback(conversationId) {
+    if (!conversationId) return null;
+    return async ({ assistantText, toolCalls, toolResults }) => {
+        await chatService.addMessage(
+            conversationId,
+            'assistant',
+            JSON.stringify({
+                [WEMIY_AGENT_ROUND_KEY]: true,
+                text: assistantText || '',
+                toolCalls,
+            })
+        );
+        for (const r of toolResults) {
+            await chatService.addMessage(
+                conversationId,
+                'tool',
+                JSON.stringify({
+                    toolCallId: r.callId,
+                    toolName: r.toolName,
+                    content: r.resultStr,
+                })
+            );
+        }
+    };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -451,12 +479,15 @@ export async function runAgent(task, options = {}) {
         projectBrief,
     });
 
+    const persistCb = buildPersistToolCallback(options.conversationId);
+
     const { finalResponse: agentResponse } = await runAgentLoop({
         aiService,
         messages,
         tools,
         maxIterations,
         renderText,
+        onPersistToolRound: persistCb,
     });
 
     // ── Phase 3: Verification ───────────────────────────────────────────
@@ -495,6 +526,7 @@ export async function runAgent(task, options = {}) {
                     tools,
                     maxIterations: fixBudget,
                     renderText,
+                    onPersistToolRound: persistCb,
                 });
 
                 iterationBudgetLeft -= iterationsUsed;
@@ -566,12 +598,15 @@ async function runDiscussionMode({ task, aiService, renderText, maxIterations, c
         projectBrief,
     });
 
+    const persistDiscuss = buildPersistToolCallback(conversationId);
+
     const { finalResponse } = await runAgentLoop({
         aiService,
         messages,
         tools,
         maxIterations,
         renderText,
+        onPersistToolRound: persistDiscuss,
     });
 
     if (conversationId) {
@@ -635,9 +670,12 @@ async function buildExecutionMessages({
     }
 
     let resumeHint = '';
-    const lastAgent = [...history].reverse().find(
-        (m) => m.role === 'assistant' && String(m.content).includes('**Agent session:**')
-    );
+    const lastAgent = [...history].reverse().find((m) => {
+        if (m.role !== 'assistant') return false;
+        const c = m.content;
+        if (typeof c === 'string') return c.includes('**Agent session:**');
+        return false;
+    });
     if (lastAgent) {
         const s = String(lastAgent.content);
         const i = s.indexOf('**Agent session:**');
@@ -647,6 +685,10 @@ async function buildExecutionMessages({
     const extraParts = [];
     if (projectBrief) {
         extraParts.push(`## Project brief (deterministic scan)\n${projectBrief}`);
+    }
+    const memoryMd = await loadProjectMemory();
+    if (memoryMd) {
+        extraParts.push(`## Project memory (.wemiy/memory.md)\n${memoryMd}`);
     }
     if (resumeHint) {
         extraParts.push(resumeHint);
@@ -664,32 +706,7 @@ async function buildExecutionMessages({
     const messages = [{ role: 'system', content: systemPrompt }];
 
     const recent = history.slice(-MAX_HYDRATED_HISTORY);
-    for (const m of recent) {
-        if (m.role === 'user' || m.role === 'assistant') {
-            messages.push({
-                role: m.role,
-                content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-            });
-        }
-        if (m.role === 'tool') {
-            const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-            let parsed = null;
-            try {
-                parsed = JSON.parse(raw);
-            } catch {
-                parsed = null;
-            }
-            if (parsed && parsed.toolCallId && parsed.toolName) {
-                const body = typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content);
-                messages.push({
-                    role: 'tool',
-                    toolCallId: parsed.toolCallId,
-                    toolName: parsed.toolName,
-                    content: body,
-                });
-            }
-        }
-    }
+    appendMessagesFromStoredHistory(messages, recent);
 
     let userContent = task;
     if (verificationFailureReport) {
