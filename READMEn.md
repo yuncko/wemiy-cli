@@ -11,7 +11,8 @@ AI-assisted CLI for fixes, project health checks, commits, reviews, and PR prep.
 - **Commit** — Conventional commit messages from your diff
 - **Review** — AI code review for current changes
 - **PR Ready** — Review/fix changed files, tests, commit message, PR description
-- **Agent** — Agentic workflows
+- **Agent** — Agentic workflows (optional `--conversation` to continue a saved thread)
+- **Conversations** — List, show, export, fork, and resume saved transcripts (`~/.orbital-cli/chats.json`)
 - **Model** — Switch provider (Gemini, OpenRouter, SwiftRouter)
 - **Wake Up** — Daily assistant prompt
 - **Login / Logout / Whoami** — Better Auth device flow (optional; requires the auth server)
@@ -65,11 +66,14 @@ wemiy commit
 wemiy review
 wemiy pr-ready [--dry-run]
 wemiy model
-wemiy agent
+wemiy agent [--conversation <uuid>] [--mode act|discuss] [--auto-approve] [--max-iterations <n>] [-y]
+wemiy conversations list
+wemiy conversations show <uuid> [--json|--markdown] [--full]
+wemiy conversations export <uuid> [-o <file>]
+wemiy conversations fork <uuid> [--until-message <message-uuid>]
+wemiy conversations resume [--max-iterations <n>] [-y]
 wemiy wake-up
 wemiy login [--server-url <url>]
-wemiy logout
-wemiy whoami
 ```
 
 Examples:
@@ -80,6 +84,26 @@ wemiy doctor --changed-only --max-files 20
 wemiy pr-ready --dry-run
 wemiy fix src/app.js
 ```
+
+## Context, memory, and conversation replay
+
+Chats and agent runs are stored locally in **`~/.orbital-cli/chats.json`**.
+
+**Typical flow**
+
+1. List conversations: `wemiy conversations list` and copy a conversation **ID**.
+2. Inspect a thread: `wemiy conversations show <id>` or `wemiy conversations show <id> --json`.
+3. Continue: `wemiy agent "your follow-up" --conversation <id>` (add `--mode discuss` for read-only Q&A).
+4. Or run: `wemiy conversations resume` for an interactive picker.
+
+**Export and fork**
+
+- `wemiy conversations export <id> -o backup.json` saves the conversation and all messages.
+- `wemiy conversations fork <id>` copies the thread to a **new** ID. Use `--until-message <msgId>` to copy only messages up to that point. Continue with `--conversation` on the new ID.
+
+**Project memory (optional)**
+
+Add **`.wemiy/memory.md`** in the repo (Markdown). The agent loads a capped excerpt into the system prompt. Do not put secrets there.
 
 ## Tech stack
 
