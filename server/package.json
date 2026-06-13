@@ -1,6 +1,6 @@
 {
   "name": "@louedev/wemiy",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "main": "src/index.js",
   "bin": {
     "wemiy": "src/cli/main.js"

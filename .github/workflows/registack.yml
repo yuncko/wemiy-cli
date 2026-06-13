@@ -1,0 +1,54 @@
+name: Registack Web CI
+
+on:
+  push:
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/registack.yml"
+  pull_request:
+    paths:
+      - "apps/web/**"
+
+defaults:
+  run:
+    working-directory: apps/web
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Migrate
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: "file:./ci.db"
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: "file:./ci.db"
+          BETTER_AUTH_SECRET: "ci-test-secret-minimum-32-characters-long"
+          BETTER_AUTH_URL: "http://localhost:3010"
+          NEXT_PUBLIC_APP_URL: "http://localhost:3010"

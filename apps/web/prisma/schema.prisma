@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String       @id
+  name          String
+  email         String       @unique
+  emailVerified Boolean      @default(false)
+  image         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  memberships   Membership[]
+  sessions      Session[]
+  accounts      Account[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Organization {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  memberships Membership[]
+  aiSystems   AiSystem[]
+  codeScans   CodeScan[]
+  questionnaires QuestionnaireSession[]
+
+  @@map("organization")
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  role           String       @default("member")
+  userId         String
+  organizationId String
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@map("membership")
+}
+
+model AiSystem {
+  id                      String   @id @default(cuid())
+  organizationId          String
+  name                    String
+  description             String?
+  purpose                 String
+  dataTypes               String   @default("[]")
+  vendor                  String?
+  deploymentEnv           String?
+  roleType                String   @default("both")
+  riskCategory            String   @default("unclassified")
+  annexIIIArea            String?
+  humanOversight          String?
+  intendedUsers           String?
+  status                  String   @default("draft")
+  classificationRationale String?
+  source                  String   @default("manual")
+  scanMetadata            String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  organization            Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("ai_system")
+}
+
+model CodeScan {
+  id             String       @id @default(cuid())
+  organizationId String
+  repoUrl        String
+  branch         String       @default("main")
+  status         String       @default("pending")
+  findings       String       @default("[]")
+  errorMessage   String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("code_scan")
+}
+
+model QuestionnaireSession {
+  id             String       @id @default(cuid())
+  organizationId String
+  title          String
+  inputText      String
+  responses      String       @default("[]")
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("questionnaire_session")
+}
