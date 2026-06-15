@@ -7,8 +7,8 @@ import path from 'path';
 import os from 'os';
 import { ChatService } from '../../../services/chat.service.js';
 import { getUserFromToken } from '../../chat/chat-base.js';
-import { runAgent } from '../../agent/agent-engine.js';
-import { AGENT_MODES } from '../../agent/agent-runtime.js';
+import { runAgent, parseMaxIterations } from '../../agent/agent-engine.js';
+import { AGENT_MODES, DEFAULT_MAX_ITERATIONS } from '../../agent/agent-runtime.js';
 
 const chatService = new ChatService();
 
@@ -226,7 +226,7 @@ async function resumeAction(options) {
         conversationId: choice,
         mode: modePick,
         autoApprove: auto === 'yes',
-        maxIterations: parseInt(options.maxIterations, 10) || 25,
+        maxIterations: parseMaxIterations(options.maxIterations),
         confirmPlan: auto === 'yes' ? false : !options.yes,
     });
 }
@@ -264,7 +264,7 @@ export const conversationsCommand = new Command('conversations')
     .addCommand(
         new Command('resume')
             .description('Interactively pick a conversation and run the agent with --conversation')
-            .option('--max-iterations <n>', 'Agent iterations', '25')
+            .option('--max-iterations <n>', 'Agent iterations', String(DEFAULT_MAX_ITERATIONS))
             .option('-y, --yes', 'Skip plan confirmation (act mode)')
             .action(resumeAction)
     );

@@ -13,6 +13,7 @@ import { chatService } from '../chat/chat-base.js';
 import {
     AGENT_MODES,
     DISCUSS_TOOL_IDS,
+    DEFAULT_MAX_ITERATIONS,
     buildAgentSystemPrompt,
     runAgentLoop,
     displayStep,
@@ -52,9 +53,32 @@ export function buildPersistToolCallback(conversationId) {
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DEFAULT_MAX_ITERATIONS = 25;
 const MAX_VERIFY_RETRIES = 3;
 const VERIFY_OUTPUT_CAP = 48000;
+const COMPLEX_TASK_PATTERN = /\b(refactor|migrate|restructure|across all|entire codebase|multiple modules|architecture|redesign)\b/i;
+
+/**
+ * Parse CLI --max-iterations with a shared default.
+ * @param {string|number|undefined} raw
+ * @returns {number}
+ */
+export function parseMaxIterations(raw) {
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_ITERATIONS;
+}
+
+/** Skip the extra planning LLM call for focused, single-step tasks. */
+function shouldSkipPlanning(task, options = {}) {
+    if (options.skipPlan) return true;
+    const trimmed = task.trim();
+    if (trimmed.length <= 90) return true;
+    if (trimmed.length <= 160 && !COMPLEX_TASK_PATTERN.test(trimmed)) return true;
+    return false;
+}
+
+function buildInlinePlan(task) {
+    return `1. Locate relevant code with grep_search and read_files\n2. Execute: ${task}\n3. Verify with tests or build commands`;
+}
 
 async function fsExists(p) {
     try {
@@ -445,19 +469,27 @@ export async function runAgent(task, options = {}) {
         });
     }
 
-    // ── Phase 1: Planning ────────────────────────────────────────────────
-    displayStep('Phase 1', '📋', 'magenta', 'Task Planning');
-    const plan = await planTask(task, aiService, projectBrief);
-    displayPlan(task, plan);
+    // ── Phase 1: Planning (skipped for simple, focused tasks) ───────────
+    const skipPlanning = shouldSkipPlanning(task, options);
+    let plan;
+    if (skipPlanning) {
+        plan = buildInlinePlan(task);
+        displayStep('Phase 1', '📋', 'magenta', 'Quick start (planning skipped for focused task)');
+        console.log(chalk.gray(`  ${plan.split('\n').join('\n  ')}\n`));
+    } else {
+        displayStep('Phase 1', '📋', 'magenta', 'Task Planning');
+        plan = await planTask(task, aiService, projectBrief);
+        displayPlan(task, plan);
 
-    if (confirmPlan) {
-        const proceed = await confirm({
-            message: chalk.cyan('Proceed with this plan?'),
-            initialValue: true,
-        });
-        if (proceed === false) {
-            console.log(chalk.yellow('\n👋 Plan rejected. Agent stopped before execution.\n'));
-            return;
+        if (confirmPlan) {
+            const proceed = await confirm({
+                message: chalk.cyan('Proceed with this plan?'),
+                initialValue: true,
+            });
+            if (proceed === false) {
+                console.log(chalk.yellow('\n👋 Plan rejected. Agent stopped before execution.\n'));
+                return;
+            }
         }
     }
 
@@ -481,7 +513,7 @@ export async function runAgent(task, options = {}) {
 
     const persistCb = buildPersistToolCallback(options.conversationId);
 
-    const { finalResponse: agentResponse } = await runAgentLoop({
+    const { finalResponse: agentResponse, iterationsUsed: primaryIterationsUsed } = await runAgentLoop({
         aiService,
         messages,
         tools,
@@ -496,33 +528,45 @@ export async function runAgent(task, options = {}) {
     const report = changeTracker.getReport();
     let verificationPassed = true;
     let lastVerifyReport = '';
-    // Track total iterations across the verification retry loop
-    let iterationBudgetLeft = Math.max(0, maxIterations - 1); // leave a small floor
+    let iterationBudgetLeft = Math.max(0, maxIterations - primaryIterationsUsed);
 
     if (report.filesModified.length > 0 || report.filesCreated.length > 0) {
         let verificationResult = await verifyChanges();
         verificationPassed = verificationResult.ok;
         lastVerifyReport = verificationResult.modelReport;
 
-        if (!verificationPassed) {
-            console.log(chalk.yellow('\n⚠️  Verification failed. The agent will attempt to fix issues...\n'));
+        if (!verificationPassed && iterationBudgetLeft > 0) {
+            console.log(chalk.yellow('\n⚠️  Verification failed. Continuing in the same thread to fix issues...\n'));
 
             for (let retry = 0; retry < MAX_VERIFY_RETRIES && iterationBudgetLeft > 0; retry++) {
-                displayStep(`Fix Attempt ${retry + 1}/${MAX_VERIFY_RETRIES}`, '🔧', 'yellow');
+                displayStep(
+                    `Fix Attempt ${retry + 1}/${MAX_VERIFY_RETRIES}`,
+                    '🔧',
+                    'yellow',
+                    `${iterationBudgetLeft} iteration(s) remaining`
+                );
 
-                const fixBudget = Math.min(10, iterationBudgetLeft);
-                const fixMessages = await buildExecutionMessages({
-                    mode: AGENT_MODES.ACT,
-                    task: 'Fix verification failures using the logs below. Make minimal changes so all checks pass.',
-                    plan: 'Address each failing command shown in the verification output.',
-                    conversationId: options.conversationId,
-                    projectBrief,
-                    verificationFailureReport: lastVerifyReport,
+                const fixBudget = Math.min(
+                    Math.max(5, Math.ceil(iterationBudgetLeft / (MAX_VERIFY_RETRIES - retry))),
+                    iterationBudgetLeft
+                );
+
+                messages.push({
+                    role: 'user',
+                    content: [
+                        '## Automated verification failed',
+                        lastVerifyReport,
+                        '',
+                        '## Your instruction',
+                        'Fix the failures above with minimal, targeted changes.',
+                        'Do not re-explore the whole codebase — use the error output and files you already touched.',
+                        'After fixing, the system will re-run verification automatically.',
+                    ].join('\n'),
                 });
 
                 const { iterationsUsed } = await runAgentLoop({
                     aiService,
-                    messages: fixMessages,
+                    messages,
                     tools,
                     maxIterations: fixBudget,
                     renderText,
@@ -538,6 +582,8 @@ export async function runAgent(task, options = {}) {
                     break;
                 }
             }
+        } else if (!verificationPassed) {
+            console.log(chalk.yellow('\n⚠️  Verification failed and iteration budget is exhausted.\n'));
         }
     } else {
         console.log(chalk.gray('  No file changes to verify.'));

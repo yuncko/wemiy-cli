@@ -13,8 +13,17 @@ export const AGENT_MODES = Object.freeze({
     DISCUSS: 'discuss',
 });
 
+/** Default agent iteration budget (shared across execution and fix retries). */
+export const DEFAULT_MAX_ITERATIONS = 35;
+
 /** Tools allowed in read-only "discuss" mode — no edits, no command execution. */
 export const DISCUSS_TOOL_IDS = Object.freeze(['read_files', 'list_dir', 'grep_search']);
+
+/** Read-only tools safe to execute in parallel within one iteration. */
+export const READ_ONLY_TOOL_IDS = Object.freeze(['read_files', 'list_dir', 'grep_search']);
+
+const STAGNATION_REPEAT_THRESHOLD = 3;
+const STAGNATION_FILE_READ_THRESHOLD = 4;
 
 export { AGENT_TOOL_IDS };
 
@@ -130,21 +139,19 @@ You have access to tools that let you explore the workspace, read files, edit co
 
 {{SHELL_GUIDANCE}}
 
-Your workflow:
-1. EXPLORE the project structure using list_dir to understand the codebase layout.
-2. SEARCH for relevant code using grep_search to find definitions, usages, and patterns.
-3. READ the relevant files using read_files to understand the exact code.
-4. EDIT code using replace_content (preferred for targeted changes) or edit_file (for new files or full rewrites).
-5. VERIFY your changes by running tests or build commands using execute_command.
-6. If a command fails, READ the error output, FIX the issue, and try again.
+Your workflow (efficient, Cursor-style):
+1. SEARCH first with grep_search to locate symbols, imports, and usages — avoid blind directory walks.
+2. READ only the files you need; batch multiple paths in one read_files call when possible.
+3. EDIT with replace_content for surgical changes; use edit_file only for new files or full rewrites.
+4. VERIFY with execute_command (tests, lint, build) after meaningful edits — not after every tiny change.
+5. If a command fails, read the error output, fix the root cause, and retry once — do not loop endlessly.
 
-Rules:
-- Always explore and read before editing. Never guess file contents.
-- Use replace_content for surgical edits (preferred). Use edit_file only for creating new files.
-- After editing, verify your changes work by running relevant commands.
-- If tests fail, read the error and fix the code. Keep iterating until it passes.
-- Be concise in your explanations. Focus on doing, not describing what you would do.
-- When your task is complete, provide a brief summary of what you did.
+Efficiency rules:
+- Minimize iterations. Combine related reads/searches; never re-read a file unless it changed or you need different lines.
+- Do not repeat the same tool call with identical arguments. If stuck, change strategy or summarize the blocker.
+- Prefer targeted grep_search over listing large trees. Use list_dir only when you lack a search anchor.
+- Make decisive edits from evidence you already gathered — avoid explore-read-explore loops.
+- When the task is complete, stop calling tools and give a brief summary.
 
 Tool argument format (always pass explicit arguments, never {}):
 - list_dir: {"path":"."}
@@ -240,11 +247,22 @@ export function displayToolResult(toolName, result) {
 
 /**
  * Execute a tool by ID. Used as a fallback when the provider does not
- * auto-execute tools (OpenAI-compatible providers). Errors are reported
- * to the debug logger with full stack, and a short string is returned to
- * the model so the loop can keep going.
+ * auto-execute tools (OpenAI-compatible providers). Prefers the agent tools
+ * map (fs-tools-auto) when provided so behavior matches the active session.
  */
-export async function executeTool(toolName, toolInput) {
+export async function executeTool(toolName, toolInput, toolsMap = null) {
+    const agentTool = toolsMap?.[toolName];
+    if (agentTool?.execute) {
+        try {
+            return await agentTool.execute(toolInput);
+        } catch (error) {
+            if (process.env.WEMIY_DEBUG) {
+                console.error(chalk.red(`[debug] Tool "${toolName}" threw:`), error);
+            }
+            return `Error executing tool "${toolName}": ${error.message}`;
+        }
+    }
+
     const toolConfig = availableTools.find((t) => t.id === toolName);
     if (!toolConfig) {
         return `Error: Tool "${toolName}" not found. Available tools: ${AGENT_TOOL_IDS.join(', ')}`;
@@ -264,6 +282,95 @@ export async function executeTool(toolName, toolInput) {
     }
 }
 
+function toolCallFingerprint(toolCalls) {
+    return toolCalls
+        .map((tc) => `${tc.name || tc.toolName}::${JSON.stringify(tc.input || tc.args || {})}`)
+        .sort()
+        .join('|');
+}
+
+function extractReadTargets(toolName, toolInput) {
+    const targets = [];
+    if (toolName === 'read_files' && Array.isArray(toolInput?.filePaths)) {
+        targets.push(...toolInput.filePaths.map(String));
+    } else if (toolName === 'grep_search' && toolInput?.path) {
+        targets.push(String(toolInput.path));
+    } else if (toolName === 'list_dir' && toolInput?.path) {
+        targets.push(String(toolInput.path));
+    }
+    return targets;
+}
+
+function maybeInjectStagnationNudge(messages, stagnationState, toolCalls) {
+    const fingerprint = toolCallFingerprint(toolCalls);
+    if (fingerprint === stagnationState.lastFingerprint) {
+        stagnationState.streak += 1;
+    } else {
+        stagnationState.lastFingerprint = fingerprint;
+        stagnationState.streak = 1;
+    }
+
+    for (const tc of toolCalls) {
+        const toolName = tc.name || tc.toolName;
+        const toolInput = tc.input || tc.args || {};
+        for (const target of extractReadTargets(toolName, toolInput)) {
+            stagnationState.recentReads.set(target, (stagnationState.recentReads.get(target) || 0) + 1);
+        }
+    }
+
+    const repeatedReads = [...stagnationState.recentReads.entries()]
+        .filter(([, count]) => count >= STAGNATION_FILE_READ_THRESHOLD)
+        .map(([target]) => target);
+
+    let nudge = null;
+    if (stagnationState.streak >= STAGNATION_REPEAT_THRESHOLD) {
+        nudge = 'System notice: The same tool calls repeated several times without progress. Change approach (different paths, patterns, or files), or stop and summarize the blocker.';
+    } else if (repeatedReads.length > 0) {
+        nudge = `System notice: You re-read the same locations repeatedly (${repeatedReads.slice(0, 3).join(', ')}). Use information already in context, make an edit, or explain what is blocking you.`;
+    }
+
+    if (nudge) {
+        messages.push({ role: 'user', content: nudge });
+        stagnationState.streak = 0;
+        stagnationState.lastFingerprint = null;
+        stagnationState.recentReads.clear();
+    }
+}
+
+async function runSingleToolCall(tc, sdkResults, toolsMap) {
+    const toolName = tc.name || tc.toolName;
+    const toolInput = tc.input || tc.args || {};
+    const callId = tc.id || tc.toolCallId;
+
+    displayStep('Tool Call', '🔧', 'cyan', toolName);
+    displayToolCall({ name: toolName, input: toolInput });
+
+    let resultStr;
+    const sdkResult = sdkResults.get(callId);
+    if (sdkResult) {
+        const value = (sdkResult.result !== undefined) ? sdkResult.result : sdkResult.output;
+        resultStr = typeof value === 'string' ? value : JSON.stringify(value);
+    } else {
+        const toolResult = await executeTool(toolName, toolInput, toolsMap);
+        resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+    }
+
+    displayStep('Result', '📊', 'green', toolName);
+    displayToolResult(toolName, resultStr);
+
+    return {
+        callId,
+        toolName,
+        resultStr,
+        message: {
+            role: 'tool',
+            toolCallId: callId,
+            toolName,
+            content: resultStr,
+        },
+    };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CORE AGENT LOOP
 // ─────────────────────────────────────────────────────────────────────────────
@@ -277,7 +384,7 @@ export async function executeTool(toolName, toolInput) {
  * @param {Object} params.aiService - provider instance with sendMessage(messages, onChunk, tools, onToolCall)
  * @param {Array}  params.messages  - canonical message array (will be appended to)
  * @param {Object} params.tools     - tools map (toolId → AI SDK tool instance)
- * @param {number} [params.maxIterations=25]
+ * @param {number} [params.maxIterations=35]
  * @param {Function} [params.renderText] - hook to render assistant text content
  * @param {null|((payload: {
  *   iteration: number,
@@ -291,14 +398,15 @@ export async function runAgentLoop({
     aiService,
     messages,
     tools,
-    maxIterations = 25,
+    maxIterations = DEFAULT_MAX_ITERATIONS,
     renderText = null,
     onPersistToolRound = null,
 }) {
     let iteration = 0;
     let finalResponse = '';
     let hitLimit = false;
-    const stagnationState = { lastFingerprint: null, streak: 0 };
+    const stagnationState = { lastFingerprint: null, streak: 0, recentReads: new Map() };
+    const readOnlySet = new Set(READ_ONLY_TOOL_IDS);
 
     while (iteration < maxIterations) {
         iteration++;
@@ -356,38 +464,31 @@ export async function runAgentLoop({
         }
 
         const toolResultsForPersist = [];
+        const readOnlyCalls = [];
+        const mutatingCalls = [];
         for (const tc of toolCalls) {
             const toolName = tc.name || tc.toolName;
-            const toolInput = tc.input || tc.args || {};
-            const callId = tc.id || tc.toolCallId;
+            if (readOnlySet.has(toolName)) readOnlyCalls.push(tc);
+            else mutatingCalls.push(tc);
+        }
 
-            displayStep('Tool Call', '🔧', 'cyan', toolName);
-            displayToolCall({ name: toolName, input: toolInput });
+        const orderedResults = [];
+        if (readOnlyCalls.length > 0) {
+            const parallelResults = await Promise.all(
+                readOnlyCalls.map((tc) => runSingleToolCall(tc, sdkResults, tools))
+            );
+            orderedResults.push(...parallelResults);
+        }
+        for (const tc of mutatingCalls) {
+            orderedResults.push(await runSingleToolCall(tc, sdkResults, tools));
+        }
 
-            let resultStr;
-            const sdkResult = sdkResults.get(callId);
-            if (sdkResult) {
-                const value = (sdkResult.result !== undefined) ? sdkResult.result : sdkResult.output;
-                resultStr = typeof value === 'string' ? value : JSON.stringify(value);
-            } else {
-                const toolResult = await executeTool(toolName, toolInput);
-                resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
-            }
-
-            displayStep('Result', '📊', 'green', toolName);
-            displayToolResult(toolName, resultStr);
-
-            messages.push({
-                role: 'tool',
-                toolCallId: callId,
-                toolName,
-                content: resultStr,
-            });
-
+        for (const result of orderedResults) {
+            messages.push(result.message);
             toolResultsForPersist.push({
-                callId,
-                toolName,
-                resultStr,
+                callId: result.callId,
+                toolName: result.toolName,
+                resultStr: result.resultStr,
             });
         }
 
@@ -412,24 +513,7 @@ export async function runAgentLoop({
             }
         }
 
-        const fingerprint = toolCalls
-            .map((tc) => `${tc.name || tc.toolName}::${JSON.stringify(tc.input || tc.args || {})}`)
-            .sort()
-            .join('|');
-        if (fingerprint === stagnationState.lastFingerprint) {
-            stagnationState.streak += 1;
-        } else {
-            stagnationState.lastFingerprint = fingerprint;
-            stagnationState.streak = 1;
-        }
-        if (stagnationState.streak >= 3) {
-            messages.push({
-                role: 'user',
-                content: 'System notice: The same tool calls repeated several times without clear progress. Change approach (different paths, patterns, or files), or stop and summarize the blocker.',
-            });
-            stagnationState.streak = 0;
-            stagnationState.lastFingerprint = null;
-        }
+        maybeInjectStagnationNudge(messages, stagnationState, toolCalls);
     }
 
     if (iteration >= maxIterations && !finalResponse) {

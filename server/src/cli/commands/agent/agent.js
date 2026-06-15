@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { text, isCancel } from '@clack/prompts';
-import { runAgent } from '../../agent/agent-engine.js';
+import { runAgent, parseMaxIterations } from '../../agent/agent-engine.js';
 import { generateApplication as scaffoldApplication } from '../../../config/agent.config.js';
 import { configManager } from '../../config/config-manager.js';
-import { AGENT_MODES } from '../../agent/agent-runtime.js';
+import { AGENT_MODES, DEFAULT_MAX_ITERATIONS } from '../../agent/agent-runtime.js';
 
 /**
  * Action handler for `wemiy agent "<task>"`.
@@ -46,7 +46,7 @@ const agentAction = async (task, options) => {
 
     await runAgent(taskDescription, {
         autoApprove: !!options.autoApprove,
-        maxIterations: parseInt(options.maxIterations, 10) || 25,
+        maxIterations: parseMaxIterations(options.maxIterations),
         mode: requestedMode,
         conversationId: options.conversation || null,
         confirmPlan: options.yes ? false : !options.autoApprove,
@@ -97,7 +97,7 @@ export const agentCommand = new Command('agent')
     .argument('[task]', 'Task description for the agent')
     .description('Run the autonomous Wemiy Agent to handle a development task end-to-end')
     .option('--auto-approve', 'Skip confirmation prompts for file edits and command execution')
-    .option('--max-iterations <n>', 'Maximum number of agent iterations (default: 25)', '25')
+    .option('--max-iterations <n>', `Maximum number of agent iterations (default: ${DEFAULT_MAX_ITERATIONS})`, String(DEFAULT_MAX_ITERATIONS))
     .option('--mode <mode>', 'Agent mode: "act" (edit & run, default) or "discuss" (read-only Q&A)', 'act')
     .option('--conversation <id>', 'Resume an existing conversation by ID for continuity across runs')
     .option('-y, --yes', 'Skip the plan-confirmation prompt before execution')

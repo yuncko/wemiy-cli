@@ -12,13 +12,13 @@ import {
     buildAgentSystemPrompt,
     runAgentLoop,
     appendMessagesFromStoredHistory,
+    DEFAULT_MAX_ITERATIONS,
 } from "../agent/agent-runtime.js";
 import { buildPersistToolCallback } from "../agent/agent-engine.js";
 import { loadProjectMemory } from "../lib/agent-project-brief.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const MAX_ITERATIONS = 20;
 const MAX_HYDRATED_HISTORY = 30;
 
 // ── Provider ───────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ async function initConversation(userId, conversationId, mode) {
         `${chalk.gray("Mode:")} ${chalk.magenta(mode === AGENT_MODES.DISCUSS ? "Discuss (Read-only)" : "Act (Autonomous)")}\n` +
         `${chalk.cyan("Working Directory:")} ${process.cwd()}\n` +
         `${chalk.gray("Tools:")} ${toolIds.join(", ")}\n` +
-        `${chalk.gray("Max Iterations:")} ${MAX_ITERATIONS}`,
+        `${chalk.gray("Max Iterations:")} ${DEFAULT_MAX_ITERATIONS}`,
         {
             padding: 1,
             margin: { top: 1, bottom: 1 },
@@ -212,7 +212,7 @@ async function agentLoop(conversation, mode, autoApprove) {
                 aiService,
                 messages,
                 tools,
-                maxIterations: MAX_ITERATIONS,
+                maxIterations: DEFAULT_MAX_ITERATIONS,
                 renderText,
                 onPersistToolRound: buildPersistToolCallback(conversation.id),
             });
